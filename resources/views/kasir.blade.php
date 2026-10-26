@@ -1,0 +1,4 @@
+<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="csrf-token" content="{{ csrf_token() }}"><title>Kasir · SAEVÉ</title>
+<link rel="stylesheet" href="{{ asset('saeve/style.css') }}"><link rel="stylesheet" href="{{ asset('saeve/staff.css') }}"></head><body data-page="kasir">
+<header class="top"><span class="nav">Kasir</span><span class="logo">SAEVÉ</span><form method="POST" action="/keluar" class="nav r">@csrf<button>Keluar</button></form></header>
+<main id="app"></main><div id="toast" class="toast"></div><script src="{{ asset('saeve/staff.js') }}"></script></body></html>
