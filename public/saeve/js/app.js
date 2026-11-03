@@ -1,3 +1,9 @@
+/*
+ * app.js
+ * Halaman pembeli (toko SAEVÉ). Routing memakai hash: #/koleksi, #/produk/1, dst.
+ * Bergantung pada: common.js, api.js, dan pdf.js (pdfjsLib).
+ */
+
 /* ===== Konfigurasi ===== */
 
 const CART_KEY = 'saeve-cart-v2';
@@ -9,6 +15,7 @@ const ORDER_STEPS = ['menunggu_ongkir', 'menunggu_bayar', 'diproses', 'dikirim',
 
 
 /* ===== Keranjang ===== */
+
 let cart = [];
 try {
   cart = JSON.parse(localStorage.getItem(CART_KEY)) || [];
@@ -30,6 +37,7 @@ function cartTotal() {
 
 
 /* ===== Potongan HTML yang dipakai berulang ===== */
+
 function whatsappLink(number, text) {
   return `https://wa.me/${number}?text=${encodeURIComponent(text)}`;
 }
@@ -68,8 +76,12 @@ function whatsappCatalogButtons() {
 }
 
 
-/* ===== Halaman (view) ===== */
+/* ===== Halaman (view) =====
+ * Setiap view mengembalikan string HTML. Event dipasang terpisah di bind().
+ */
+
 const views = {
+  /* ---- Beranda: pratinjau katalog PDF ---- */
   home() {
     return pageHeader('2026', 'SAEVÉ Catalog', 'Jelajahi seluruh koleksi kami dalam satu halaman.') + `
       <div class="frame" id="pbox">
@@ -234,7 +246,8 @@ const views = {
 
     const date = new Date(order.createdAt).toLocaleString('id-ID');
     const currentStep = ORDER_STEPS.indexOf(order.status);
-    const shippingPending = order.delivery === 'kirim' && !order.shippingFee;
+    // Ongkir baru "belum ditetapkan" selama status masih menunggu_ongkir (ongkir Rp 0 / gratis tetap dianggap sudah ditetapkan)
+    const shippingPending = order.delivery === 'kirim' && order.status === 'menunggu_ongkir';
 
     const itemRows = order.items.map((item) => `
       <div class="sum">
@@ -279,6 +292,7 @@ const views = {
 
 
 /* ===== Router ===== */
+
 async function route() {
   const [, name = 'home', ...params] = (location.hash || '#/').slice(1).split('/');
 
@@ -289,6 +303,7 @@ async function route() {
     return;
   }
 
+  // Buang item keranjang yang variannya sudah tidak ada
   cart = cart.filter((item) => API.findVariant(item.variantId));
   saveCart();
 
@@ -300,6 +315,7 @@ async function route() {
 
 
 /* ===== Event handler (dipasang setiap halaman selesai dirender) ===== */
+
 function bind() {
   if ($('#pdf')) initPdf();
   bindAddToCart();
@@ -403,6 +419,7 @@ function bindPrint() {
 
 
 /* ===== Pratinjau katalog PDF ===== */
+
 let pdfDoc = null;
 let pdfPage = 1;
 let pdfZoom = 1;
@@ -480,6 +497,7 @@ async function initPdf() {
 
 
 /* ===== Mulai ===== */
+
 addEventListener('hashchange', route);
 saveCart();
 route();
