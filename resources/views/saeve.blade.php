@@ -8,16 +8,26 @@
 </head>
 <body>
     <header class="top">
-        <a href="#/koleksi" class="nav">Koleksi</a>
         <a href="#/" class="logo">SAEVÉ</a>
-        <a href="#/pesanan" class="nav r">Cek pesanan</a>
+        <nav class="menu">
+            <a href="#/koleksi">Koleksi</a>
+            <a href="#/" data-goto="gallery">Gallery</a>
+            <a href="#/" data-goto="kontak">Kontak</a>
+            <a href="#/pesanan">Cek Pesanan</a>
+        </nav>
     </header>
 
     <main id="app"></main>
 
     <footer>© 2026 Saevé. Seluruh hak cipta dilindungi undang-undang. — saeve.store</footer>
 
-    <a href="#/keranjang" class="fab" id="fab">ORDER <b id="cnt">0</b></a>
+    <a href="#/keranjang" class="fab" id="fab">
+        <span class="ic">
+            <svg viewBox="0 0 24 24" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h3l2.6 12.2a1 1 0 0 0 1 .8h9.6a1 1 0 0 0 1-.8L21 7H6"/><circle cx="9.5" cy="20" r="1.3"/><circle cx="17" cy="20" r="1.3"/></svg>
+            <b id="cnt" hidden>0</b>
+        </span>
+        <span>Orders</span>
+    </a>
     <div id="toast" class="toast"></div>
 
     {{-- Urutan penting: pdf.js -> common -> api -> app --}}

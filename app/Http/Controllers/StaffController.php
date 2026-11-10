@@ -4,11 +4,13 @@ namespace App\Http\Controllers;
 
 use App\Models\Order;
 use App\Models\Product;
+use App\Models\ProductPhoto;
 use App\Models\ProductVariant;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 
 class StaffController extends Controller
@@ -16,6 +18,9 @@ class StaffController extends Controller
     private const STATUSES = ['menunggu_ongkir', 'menunggu_bayar', 'diproses', 'dikirim', 'siap_ambil', 'selesai', 'dibatalkan', 'tindak_lanjut'];
 
     private const CATEGORIES = ['gelang', 'kalung', 'cincin', 'anting', 'bagcharm'];
+
+    /* Maksimal foto per produk (harus sama dengan PHOTO_LIMIT di staff.js). */
+    private const PHOTO_LIMIT = 6;
 
     /* Perubahan status manual yang diizinkan: status sekarang => status tujuan. */
     private const TRANSITIONS = [
@@ -63,6 +68,23 @@ class StaffController extends Controller
             'items' => $o->items->map(fn ($i) => [
                 'productName' => $i->product_name, 'color' => $i->color, 'size' => $i->size,
                 'qty' => $i->qty, 'unitPrice' => $i->unit_price, 'stock' => $stock[$i->variant_id] ?? 0,
+            ])->values(),
+        ];
+    }
+
+    /* Bentuk JSON produk (varian + foto) untuk frontend. */
+    private function pj(Product $p): array
+    {
+        $p->loadMissing(['variants', 'photos']);
+
+        return [
+            'id' => $p->id, 'name' => $p->name, 'category' => $p->category, 'price' => $p->price,
+            'photos' => $p->photos->map(fn ($photo) => [
+                'id' => $photo->id,
+                'url' => Storage::disk('public')->url($photo->path),
+            ])->values(),
+            'variants' => $p->variants->map(fn ($v) => [
+                'id' => $v->id, 'color' => $v->color, 'size' => $v->size, 'stock' => $v->stock,
             ])->values(),
         ];
     }
@@ -185,12 +207,9 @@ class StaffController extends Controller
 
     public function products()
     {
-        return Product::with('variants')->orderBy('id')->get()->map(fn ($p) => [
-            'id' => $p->id, 'name' => $p->name, 'category' => $p->category, 'price' => $p->price,
-            'variants' => $p->variants->map(fn ($v) => [
-                'id' => $v->id, 'color' => $v->color, 'size' => $v->size, 'stock' => $v->stock,
-            ])->values(),
-        ])->values();
+        return Product::with(['variants', 'photos'])->orderBy('id')->get()
+            ->map(fn ($p) => $this->pj($p))
+            ->values();
     }
 
     public function createProduct(Request $r)
@@ -239,6 +258,48 @@ class StaffController extends Controller
         $variant->update(['stock' => $d['stock']]);
 
         return ['id' => $variant->id, 'stock' => $variant->stock];
+    }
+
+    /* Unggah satu atau beberapa foto produk (JPG/PNG/WEBP, maks. 5 MB per foto, total 6 foto). */
+    public function uploadPhotos(Request $r, Product $product)
+    {
+        $r->validate([
+            'photos' => 'required|array|min:1|max:' . self::PHOTO_LIMIT,
+            'photos.*' => 'file|mimes:jpg,jpeg,png,webp|max:5120',
+        ], [
+            'photos.*.mimes' => 'Format foto harus JPG, PNG, atau WEBP.',
+            'photos.*.max' => 'Ukuran foto maksimal 5 MB.',
+            'photos.*.uploaded' => 'Foto gagal diunggah. Periksa ukuran fotonya.',
+        ]);
+
+        return DB::transaction(function () use ($r, $product) {
+            $p = Product::with('photos')->lockForUpdate()->findOrFail($product->id);
+            $files = $r->file('photos');
+
+            if ($p->photos->count() + count($files) > self::PHOTO_LIMIT) {
+                $this->fail('Maksimal ' . self::PHOTO_LIMIT . ' foto per produk.');
+            }
+
+            $position = (int) $p->photos->max('position');
+            foreach ($files as $file) {
+                $p->photos()->create([
+                    'path' => $file->store('products', 'public'),
+                    'position' => ++$position,
+                ]);
+            }
+
+            return $this->pj($p->fresh(['variants', 'photos']));
+        });
+    }
+
+    public function deletePhoto(ProductPhoto $photo)
+    {
+        $productId = $photo->product_id;
+
+        Storage::disk('public')->delete($photo->path);
+        $photo->delete();
+
+        return $this->pj(Product::with(['variants', 'photos'])->findOrFail($productId));
     }
 
     /* ---------------------------------------------------------------

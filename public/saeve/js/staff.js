@@ -54,6 +54,22 @@ async function staffApi(url, method = 'GET', body) {
   return data;
 }
 
+/* Upload berkas (multipart). Content-Type diisi browser sendiri, jadi tidak ditulis di sini. */
+async function staffUpload(url, formData) {
+  const response = await fetch('/staff/' + url, {
+    method: 'POST',
+    headers: { 'Accept': 'application/json', 'X-CSRF-TOKEN': CSRF_TOKEN },
+    body: formData,
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    if ([401, 403, 419].includes(response.status)) location = '/masuk';
+    throw new Error(data.message || 'Gagal mengunggah. Periksa ukuran dan format foto.');
+  }
+  return data;
+}
+
 /* Jalankan aksi; kalau gagal, tampilkan pesan errornya sebagai toast. */
 async function safely(action) {
   try {
@@ -131,20 +147,54 @@ const admin = {
   tab: 'orders',          // orders | products | reports
   orders: [],
   products: [],
-  filter: 'semua',        // filter status di tab pesanan
-  selectedCode: null,     // kode pesanan yang sedang dibuka
+  selectedCode: null,     // kode pesanan yang sedang dibuka (kosong = pesanan pertama)
   receiptCode: null,      // kode pesanan yang struknya sedang ditampilkan
   showAddForm: false,     // form "Tambah produk"
+  photoProductId: null,   // id produk yang panel "Kelola Foto"-nya terbuka
+  photoQueue: [],         // foto yang dipilih tapi belum disimpan: { file, url }
   report: null,
   from: toDateInputValue(thirtyDaysAgo),
   to: toDateInputValue(today),
   channel: 'semua',
 };
 
+/* Pilihan pada dropdown status (urutan sesuai Figma). */
+const ADMIN_STATUS_OPTIONS = [
+  ['menunggu_bayar', 'Menunggu Pembayaran'],
+  ['diproses', 'Diproses'],
+  ['dikirim', 'Dikirim'],
+  ['siap_ambil', 'Siap diambil'],
+  ['selesai', 'Selesai'],
+  ['dibatalkan', 'Dibatalkan'],
+];
+
+/* Perubahan status manual yang diizinkan server (sama dengan TRANSITIONS di StaffController). */
+const STATUS_TRANSITIONS = {
+  menunggu_ongkir: ['dibatalkan'],
+  menunggu_bayar: ['dibatalkan'],
+  tindak_lanjut: ['diproses', 'dibatalkan'],
+  diproses: ['dikirim', 'siap_ambil', 'dibatalkan'],
+  dikirim: ['selesai', 'dibatalkan'],
+  siap_ambil: ['selesai', 'dibatalkan'],
+};
+
+/* Status tujuan yang boleh dipilih untuk pesanan ini ("Dikirim" hanya untuk kirim, "Siap diambil" hanya untuk ambil di toko). */
+function allowedStatuses(order) {
+  const isDelivery = order.delivery === 'kirim';
+  return (STATUS_TRANSITIONS[order.status] || []).filter((status) =>
+    !(status === 'dikirim' && !isDelivery) && !(status === 'siap_ambil' && isDelivery));
+}
+
+/* Status yang butuh tindakan admin (ditandai merah di daftar, dihitung di tab). */
+const ACTION_STATUSES = ['menunggu_ongkir', 'tindak_lanjut'];
+
 /* Jumlah pesanan yang butuh tindakan admin (ditampilkan di tab). */
 function ordersNeedingAction() {
-  return admin.orders.filter((order) => ['menunggu_ongkir', 'tindak_lanjut'].includes(order.status)).length;
+  return admin.orders.filter((order) => ACTION_STATUSES.includes(order.status)).length;
 }
+
+/* Pesanan yang sedang dibuka. Kalau belum ada yang dipilih, pakai pesanan pertama. */
+const selectedOrder = () => admin.orders.find((order) => order.code === admin.selectedCode) || admin.orders[0];
 
 function loadReport() {
   return staffApi(`report?from=${admin.from}&to=${admin.to}&channel=${admin.channel}`);
@@ -164,7 +214,7 @@ function drawAdmin() {
   const needAction = ordersNeedingAction();
 
   const tabButtons = tabs.map(([key, label]) => `
-    <button class="pill ${admin.tab === key ? 'on' : ''}" data-a="tab" data-v="${key}">${label}${key === 'orders' && needAction ? ` (${needAction})` : ''}</button>
+    <button type="button" class="adm-tab ${admin.tab === key ? 'on' : ''}" data-a="tab" data-v="${key}">${label}${key === 'orders' && needAction ? ` (${needAction})` : ''}</button>
   `).join('');
 
   const content = admin.tab === 'orders'
@@ -173,102 +223,241 @@ function drawAdmin() {
       ? renderProductsTab()
       : renderReportTab();
 
-  app.innerHTML = `<div class="tabs">${tabButtons}</div>` + content;
+  // Tab ada di bar sendiri di bawah header (#tabs di admin.blade.php)
+  const tabBar = $('#tabs');
+  if (tabBar) {
+    tabBar.innerHTML = tabButtons;
+    app.innerHTML = content;
+  } else {
+    app.innerHTML = `<div class="tabs">${tabButtons}</div>` + content;
+  }
 }
 
 
 /* ---- Tab: Pesanan ---- */
+
+/* "Rahul - Online" (dikirim) atau "Titut - Toko" (ambil di toko) */
+function orderLabel(order) {
+  return `${order.name} - ${order.delivery === 'kirim' ? 'Online' : 'Toko'}`;
+}
+
 function renderOrdersTab() {
-  const visibleOrders = admin.orders.filter((order) => admin.filter === 'semua' || order.status === admin.filter);
-  const selected = admin.orders.find((order) => order.code === admin.selectedCode);
+  const selected = selectedOrder();
 
-  const filterPills = ['semua', ...Object.keys(STATUS_LABELS)].map((status) => `
-    <button class="pill ${admin.filter === status ? 'on' : ''}" data-a="filter" data-v="${status}">${status === 'semua' ? 'Semua' : STATUS_LABELS[status]}</button>
-  `).join('');
-
-  const orderRows = visibleOrders.map((order) => `
-    <button class="orow ${order.code === admin.selectedCode ? 'on' : ''}" data-a="select" data-v="${order.code}">
-      <span><b>${escapeHtml(order.code)}</b> · ${escapeHtml(order.name)}</span>
-      <span>${formatRupiah(order.total)} ${statusBadge(order.status)}</span>
+  const orderRows = admin.orders.map((order) => `
+    <button type="button" class="orow ${selected && order.code === selected.code ? 'on' : ''}" data-a="select" data-v="${escapeHtml(order.code)}">
+      <span class="orow-line">
+        <span class="orow-code">${escapeHtml(order.code)}</span>
+        <span class="orow-total">${formatRupiah(order.total)}</span>
+      </span>
+      <span class="orow-line">
+        <span class="orow-name">${escapeHtml(orderLabel(order))}</span>
+        <span class="orow-st ${ACTION_STATUSES.includes(order.status) ? 'act' : ''}">${STATUS_LABELS[order.status] || order.status}</span>
+      </span>
     </button>
-  `).join('') || '<p class="sub">Belum ada pesanan.</p>';
+  `).join('') || '<p class="sub od-empty">Belum ada pesanan.</p>';
 
   return `
-    <h1 class="l">Pesanan online</h1>
-    <div class="pills left">${filterPills}</div>
     <div class="split">
       <div class="lst">${orderRows}</div>
-      <div>${selected ? renderOrderDetail(selected) : '<p class="sub">Pilih pesanan di sebelah kiri.</p>'}</div>
+      <div>${selected ? renderOrderDetail(selected) : '<div class="od"><p class="sub">Belum ada pesanan.</p></div>'}</div>
     </div>`;
 }
 
 function renderOrderDetail(order) {
   const isDelivery = order.delivery === 'kirim';
   const isPending = ['menunggu_ongkir', 'menunggu_bayar', 'tindak_lanjut'].includes(order.status);
-  const isFinished = ['selesai', 'dibatalkan'].includes(order.status);
   const canSetShipping = isDelivery && !order.verified && ['menunggu_ongkir', 'menunggu_bayar'].includes(order.status);
+  const canVerify = order.status === 'menunggu_bayar';
+  const receiptShown = admin.receiptCode === order.code;
 
-  // Tombol "langkah berikutnya" sesuai status & cara penerimaan
-  let next = null;
-  if (order.status === 'diproses') {
-    next = isDelivery ? ['dikirim', 'Tandai dikirim'] : ['siap_ambil', 'Siap diambil'];
-  } else if (['dikirim', 'siap_ambil'].includes(order.status)) {
-    next = ['selesai', 'Tandai selesai'];
-  }
-
+  const channelLabel = `${isDelivery ? 'Online' : 'Toko'} - ${order.payment === 'tunai' ? 'Tunai' : 'Transfer'}`;
   const address = isDelivery
     ? escapeHtml([order.address, order.city, order.postal].filter(Boolean).join(', '))
     : 'Ambil di toko';
 
   const itemRows = order.items.map((item) => `
-    <div class="sum">
-      <span>${escapeHtml(item.productName)} <small>${variantLabel(item.color, item.size)} × ${item.qty}</small>
-        ${isPending ? `<span class="bd ${item.stock < item.qty ? 'bad' : 'ok'}">stok ${item.stock}</span>` : ''}
-      </span>
-      <span>${formatRupiah(item.qty * item.unitPrice)}</span>
+    <div class="od-item">
+      <div class="od-line"><span>${escapeHtml(item.productName)}</span><span>${formatRupiah(item.qty * item.unitPrice)}</span></div>
+      <div class="od-var">${variantLabel(item.color, item.size)} x ${item.qty}${isPending && item.stock < item.qty ? ` <span class="od-warn">stok kurang (${item.stock})</span>` : ''}</div>
     </div>`).join('');
 
   const shippingRow = isDelivery
-    ? `<div class="sum"><span>Ongkir</span><span>${order.status === 'menunggu_ongkir' ? 'Belum ditetapkan' : formatRupiah(order.shippingFee)}</span></div>`
+    ? `<div class="od-line"><span>Ongkir</span><span>${order.status === 'menunggu_ongkir' ? 'Belum ditetapkan' : formatRupiah(order.shippingFee)}</span></div>`
     : '';
 
   const shippingForm = canSetShipping
-    ? `<div class="fl">Ongkos kirim (Rp)<input id="ship" type="number" min="0" step="500" value="${order.status === 'menunggu_ongkir' ? '' : order.shippingFee}"></div>
-       <button class="btn" data-a="ship">Simpan ongkir</button>`
+    ? `<div class="od-lbl">Ongkir (Rp)</div>
+       <div class="od-ctl">
+         <input id="ship" class="od-in" type="number" min="0" step="500" inputmode="numeric" value="${order.status === 'menunggu_ongkir' ? '' : order.shippingFee}">
+         <button type="button" class="od-btn pri" data-a="ship">Tetapkan Ongkir</button>
+       </div>`
     : '';
 
-  const verifyBlock = order.status === 'menunggu_bayar'
-    ? `<p class="sub">Cek mutasi rekening untuk ${formatRupiah(order.total)} dari ${escapeHtml(order.name)} sebelum memverifikasi.</p>
-       <button class="btn pri" data-a="verify">Pembayaran sudah masuk</button>`
+  const paymentRow = `
+    <div class="od-ctl od-pay">
+      <span class="od-paytxt">Pembayaran : ${order.verified ? 'Terverifikasi' : 'Belum Terverifikasi'}</span>
+      ${canVerify ? '<button type="button" class="od-btn" data-a="verify">Tandai Verifikasi</button>' : '<span></span>'}
+    </div>
+    ${canVerify ? `<p class="od-hint">Cek mutasi rekening untuk ${formatRupiah(order.total)} dari ${escapeHtml(order.name)} sebelum memverifikasi.</p>` : ''}`;
+
+  const followUp = order.status === 'tindak_lanjut'
+    ? '<div class="al">Pembayaran masuk tetapi stok kurang. Tambah stok di tab Produk & stok, lalu ubah status ke Diproses.</div>'
     : '';
 
-  const followUpBlock = order.status === 'tindak_lanjut'
-    ? `<div class="al">Pembayaran masuk tetapi stok kurang. Tambah stok di tab Produk & stok, lalu proses.</div>
-       <button class="btn pri" data-a="status" data-v="diproses">Proses pesanan</button>`
-    : '';
-
-  const nextButton = next ? `<button class="btn pri" data-a="status" data-v="${next[0]}">${next[1]}</button>` : '';
-  const cancelButton = isFinished ? '' : '<button class="btn" data-a="cancel">Batalkan pesanan</button>';
-  const receiptShown = admin.receiptCode === order.code;
+  // Status saat ini selalu ada di daftar, walau tidak termasuk pilihan Figma (mis. Menunggu ongkir)
+  // Semua opsi Figma tetap tampil, tapi yang ditolak server dinonaktifkan
+  const allowed = allowedStatuses(order);
+  const knownStatus = ADMIN_STATUS_OPTIONS.some(([value]) => value === order.status);
+  const statusOptions = (knownStatus ? [] : [[order.status, STATUS_LABELS[order.status] || order.status]])
+    .concat(ADMIN_STATUS_OPTIONS)
+    .map(([value, label]) => {
+      const isCurrent = value === order.status;
+      const usable = isCurrent || allowed.includes(value);
+      return `<option value="${value}" ${isCurrent ? 'selected' : ''} ${usable ? '' : 'disabled'}>${label}</option>`;
+    })
+    .join('');
 
   return `
-    <div class="box">
-      <div class="sum"><h2 class="l">${escapeHtml(order.code)}</h2>${statusBadge(order.status)}</div>
-      <p class="sub">${escapeHtml(order.name)} · ${escapeHtml(order.phone)} · ${formatDateTime(order.createdAt)}<br>${address}</p>
-      ${itemRows}
-      <div class="sum"><span>Subtotal</span><span>${formatRupiah(order.subtotal)}</span></div>
-      ${shippingRow}
-      <div class="sum t"><span>Total</span><span>${formatRupiah(order.total)}</span></div>
+    <div class="od">
+      <div class="od-head">
+        <h2 class="od-code">${escapeHtml(order.code)}</h2>
+        <span class="od-ch">${channelLabel}</span>
+      </div>
+
+      <div class="od-blk">
+        <div class="od-k">Pelanggan</div>
+        <div class="od-v">${escapeHtml(orderLabel(order))}</div>
+        <div class="od-m">${escapeHtml(order.phone)} · ${formatDateTime(order.createdAt)}</div>
+      </div>
+      <div class="od-blk">
+        <div class="od-k">Pengambilan</div>
+        <div class="od-v">${address}</div>
+      </div>
+
+      <div class="od-items">${itemRows}</div>
+
+      <div class="od-sums">
+        <div class="od-line"><span>Subtotal</span><span>${formatRupiah(order.subtotal)}</span></div>
+        ${shippingRow}
+        <div class="od-line t"><span>Total</span><span>${formatRupiah(order.total)}</span></div>
+      </div>
+
       ${shippingForm}
-      ${verifyBlock}
-      ${followUpBlock}
-      ${nextButton}${cancelButton}<button class="btn" data-a="receipt">${receiptShown ? 'Tutup struk' : 'Lihat struk'}</button>
+      ${paymentRow}
+      ${followUp}
+
+      <div class="od-lbl">Status</div>
+      <div class="od-ctl">
+        <select id="st" class="od-in od-sel" aria-label="Status pesanan" ${allowed.length ? '' : 'disabled'}>${statusOptions}</select>
+        <button type="button" class="od-btn gray" id="st-go" data-a="status" disabled>Ubah Status</button>
+      </div>
+
+      <button type="button" class="od-link" data-a="receipt">${receiptShown ? 'Tutup struk' : 'Lihat struk'}</button>
     </div>
     ${receiptShown ? renderReceipt(order) + '<div class="acts"><button class="btn pri" data-a="print">Cetak struk</button></div>' : ''}`;
 }
 
 
 /* ---- Tab: Produk & stok ---- */
+const PHOTO_LIMIT = 6;
+const PHOTO_MAX_BYTES = 5 * 1024 * 1024;
+const PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+
+const UPLOAD_ICON = '<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M24 36V10M12 22L24 10l12 12M10 43h28"/></svg>';
+
+/* Buang foto yang menunggu diunggah (sekaligus melepas memori pratinjaunya). */
+function clearPhotoQueue() {
+  admin.photoQueue.forEach((item) => URL.revokeObjectURL(item.url));
+  admin.photoQueue = [];
+}
+
+/* Masukkan foto pilihan/seretan ke antrean setelah dicek format, ukuran, dan jumlahnya. */
+function queuePhotos(files) {
+  const product = admin.products.find((p) => p.id === admin.photoProductId);
+  if (!product) return;
+
+  let room = PHOTO_LIMIT - (product.photos || []).length - admin.photoQueue.length;
+  for (const file of files) {
+    if (!PHOTO_TYPES.includes(file.type)) {
+      showToast('Format foto harus JPG, PNG, atau WEBP', 2600);
+      continue;
+    }
+    if (file.size > PHOTO_MAX_BYTES) {
+      showToast('Ukuran foto maksimal 5 MB', 2600);
+      continue;
+    }
+    if (room <= 0) {
+      showToast('Maksimal ' + PHOTO_LIMIT + ' foto per produk', 2600);
+      break;
+    }
+    admin.photoQueue.push({ file, url: URL.createObjectURL(file) });
+    room--;
+  }
+  drawAdmin();
+}
+
+function replaceProduct(updated) {
+  admin.products = admin.products.map((product) => (product.id === updated.id ? updated : product));
+}
+
+function renderPhotoPanel(product) {
+  const saved = (product.photos || []).map((photo) => `
+    <div class="ph-item">
+      <img src="${escapeHtml(photo.url)}" alt="">
+      <button type="button" class="ph-x" data-a="photo-del" data-v="${photo.id}" aria-label="Hapus foto">×</button>
+    </div>`).join('');
+
+  const queued = admin.photoQueue.map((item, index) => `
+    <div class="ph-item new">
+      <img src="${item.url}" alt="">
+      <button type="button" class="ph-x" data-a="photo-unq" data-v="${index}" aria-label="Batalkan foto ini">×</button>
+    </div>`).join('');
+
+  return `
+    <div class="ph-panel">
+      ${saved || queued ? `<div class="ph-list">${saved}${queued}</div>` : ''}
+      <label class="dz">
+        ${UPLOAD_ICON}
+        <span class="dz-t">Seret foto ke sini atau pilih dari perangkat</span>
+        <span class="dz-s">JPG, PNG, WEBP · maks. 5 MB per foto · hingga ${PHOTO_LIMIT} foto</span>
+        <input type="file" id="pfile" accept="image/jpeg,image/png,image/webp" multiple>
+      </label>
+      <div class="ph-acts">
+        <button type="button" class="btn-dark ph-save" data-a="photo-save" ${admin.photoQueue.length ? '' : 'disabled'}>Simpan Foto</button>
+        <button type="button" class="pc-link on" data-a="photo-cancel">Batal</button>
+      </div>
+    </div>`;
+}
+
+function renderProductCard(product) {
+  const panelOpen = admin.photoProductId === product.id;
+  const cover = (product.photos || [])[0];
+
+  const variantRows = product.variants.map((variant) => `
+    <div class="pc-var">
+      <span>${variantLabel(variant.color, variant.size)}</span>
+      <label class="pc-stok">Stok
+        <input type="number" min="0" value="${variant.stock}" data-a="stock" data-v="${variant.id}" aria-label="Stok ${variantLabel(variant.color, variant.size)}">
+      </label>
+    </div>`).join('');
+
+  return `
+    <section class="pc">
+      <div class="pc-head">
+        <div class="pc-thumb">${cover ? `<img src="${escapeHtml(cover.url)}" alt="">` : ''}</div>
+        <div class="pc-info">
+          <h2 class="pc-name">${escapeHtml(product.name)}</h2>
+          <div class="pc-cat">${categoryLabel(product.category)}</div>
+          <button type="button" class="pc-link ${panelOpen ? 'on' : ''}" data-a="photos" data-v="${product.id}">Kelola Foto</button>
+        </div>
+        <div class="pc-price">${formatRupiahCard(product.price)}</div>
+      </div>
+      ${panelOpen ? renderPhotoPanel(product) : ''}
+      <div class="pc-vars">${variantRows}</div>
+    </section>`;
+}
+
 function renderProductsTab() {
   const categoryOptions = PRODUCT_CATEGORIES.map((category) => `
     <option value="${category}">${categoryLabel(category)}</option>
@@ -289,26 +478,13 @@ function renderProductsTab() {
       <button class="btn pri" data-a="save-product">Simpan produk</button>
     </div>` : '';
 
-  const productBoxes = admin.products.map((product) => `
-    <div class="box">
-      <div class="sum"><b>${escapeHtml(product.name)}</b><span>${formatRupiah(product.price)}</span></div>
-      <div class="vg">
-        ${product.variants.map((variant) => `
-          <label class="vi">${variantLabel(variant.color, variant.size)}
-            <input type="number" min="0" value="${variant.stock}" data-a="stock" data-v="${variant.id}">
-          </label>`).join('')}
-      </div>
-    </div>
-  `).join('');
+  const cards = admin.products.map(renderProductCard).join('') || '<p class="sub">Belum ada produk.</p>';
 
   return `
-    <div class="sum">
-      <h1 class="l">Produk dan stok</h1>
-      <button class="btn pri" data-a="toggle-add">${admin.showAddForm ? 'Tutup' : 'Tambah produk'}</button>
-    </div>
+    <h1 class="pg-title">Produk &amp; Stok</h1>
+    ${cards}
     ${addForm}
-    ${productBoxes}
-    <p class="sub">Ubah angka stok lalu klik di luar kotak untuk menyimpan.</p>`;
+    <button type="button" class="btn-dark" data-a="toggle-add">${admin.showAddForm ? 'Tutup' : 'Tambah Produk'}</button>`;
 }
 
 
@@ -375,19 +551,14 @@ function renderReportTab() {
 
 
 /* ---- Aksi Admin (nilai data-a pada tombol) ---- */
-const selectedOrder = () => admin.orders.find((order) => order.code === admin.selectedCode);
-
 const adminActions = {
   async tab(el) {
     admin.tab = el.dataset.v;
+    clearPhotoQueue();
+    admin.photoProductId = null;
     if (admin.tab === 'products') admin.products = await staffApi('products');
     if (admin.tab === 'orders') admin.orders = await staffApi('orders');
     if (admin.tab === 'reports' && !admin.report) admin.report = await loadReport();
-    drawAdmin();
-  },
-
-  filter(el) {
-    admin.filter = el.dataset.v;
     drawAdmin();
   },
 
@@ -409,7 +580,9 @@ const adminActions = {
 
   async ship() {
     const order = selectedOrder();
-    updateOrder(await staffApi(`orders/${order.id}/shipping`, 'POST', { fee: +$('#ship').value }));
+    const fee = $('#ship').value;
+    if (fee === '') return showToast('Isi ongkir dulu', 2400);
+    updateOrder(await staffApi(`orders/${order.id}/shipping`, 'POST', { fee: +fee }));
     showToast('Ongkir disimpan', 2400);
   },
 
@@ -419,16 +592,56 @@ const adminActions = {
     showToast('Pembayaran diverifikasi', 2400);
   },
 
-  async status(el) {
+  /* Ubah status lewat dropdown. Tombolnya baru aktif kalau pilihan berbeda dari status sekarang. */
+  async status() {
     const order = selectedOrder();
-    updateOrder(await staffApi(`orders/${order.id}/status`, 'POST', { status: el.dataset.v }));
+    const status = $('#st').value;
+    if (status === order.status) return;
+
+    if (status === 'dibatalkan' && !confirm('Batalkan pesanan ' + order.code + '? Stok akan dikembalikan bila sudah dikurangi.')) return;
+
+    updateOrder(await staffApi(`orders/${order.id}/status`, 'POST', { status }));
     showToast('Status diperbarui', 2400);
   },
 
-  async cancel() {
-    const order = selectedOrder();
-    if (!confirm('Batalkan pesanan ' + order.code + '? Stok akan dikembalikan bila sudah dikurangi.')) return;
-    updateOrder(await staffApi(`orders/${order.id}/status`, 'POST', { status: 'dibatalkan' }));
+  /* ---- Foto produk ---- */
+  photos(el) {
+    const id = +el.dataset.v;
+    clearPhotoQueue();
+    admin.photoProductId = admin.photoProductId === id ? null : id;
+    drawAdmin();
+  },
+
+  'photo-cancel'() {
+    clearPhotoQueue();
+    admin.photoProductId = null;
+    drawAdmin();
+  },
+
+  'photo-unq'(el) {
+    const [removed] = admin.photoQueue.splice(+el.dataset.v, 1);
+    if (removed) URL.revokeObjectURL(removed.url);
+    drawAdmin();
+  },
+
+  async 'photo-save'() {
+    if (!admin.photoQueue.length) return showToast('Pilih foto dulu', 2400);
+
+    const formData = new FormData();
+    admin.photoQueue.forEach((item) => formData.append('photos[]', item.file));
+
+    replaceProduct(await staffUpload(`products/${admin.photoProductId}/photos`, formData));
+    clearPhotoQueue();
+    admin.photoProductId = null;
+    drawAdmin();
+    showToast('Foto disimpan', 2400);
+  },
+
+  async 'photo-del'(el) {
+    if (!confirm('Hapus foto ini?')) return;
+    replaceProduct(await staffApi(`photos/${el.dataset.v}`, 'DELETE'));
+    drawAdmin();
+    showToast('Foto dihapus', 2400);
   },
 
   'toggle-add'() {
@@ -645,6 +858,16 @@ document.addEventListener('change', (event) => {
     });
   }
 
+  // Admin: tombol "Ubah Status" aktif hanya kalau pilihan beda dari status sekarang
+  if (el.id === 'st') {
+    const order = selectedOrder();
+    const button = $('#st-go');
+    if (order && button) button.disabled = el.value === order.status;
+  }
+
+  // Admin: foto dipilih lewat dialog berkas
+  if (el.id === 'pfile') queuePhotos(Array.from(el.files));
+
   // Kasir: ganti metode bayar
   if (el.id === 'pay') renderBill();
 });
@@ -656,6 +879,28 @@ document.addEventListener('input', (event) => {
     renderPosResults();
   }
   if (event.target.id === 'cash') renderBill();
+});
+
+
+/* Admin: seret foto ke kotak unggah */
+document.addEventListener('dragover', (event) => {
+  const zone = event.target.closest && event.target.closest('.dz');
+  if (!zone) return;
+  event.preventDefault();
+  zone.classList.add('over');
+});
+
+document.addEventListener('dragleave', (event) => {
+  const zone = event.target.closest && event.target.closest('.dz');
+  if (zone) zone.classList.remove('over');
+});
+
+document.addEventListener('drop', (event) => {
+  const zone = event.target.closest && event.target.closest('.dz');
+  if (!zone) return;
+  event.preventDefault();
+  zone.classList.remove('over');
+  queuePhotos(Array.from(event.dataTransfer.files));
 });
 
 

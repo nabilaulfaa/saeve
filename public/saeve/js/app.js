@@ -13,6 +13,27 @@ const PDFJS_WORKER_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174
 const CATALOG_CATEGORIES = ['semua', ...PRODUCT_CATEGORIES];
 const ORDER_STEPS = ['menunggu_ongkir', 'menunggu_bayar', 'diproses', 'dikirim', 'selesai'];
 
+/* Isi dengan path foto galeri, contoh: ['/saeve/img/g1.jpg', ...]. Kosong = kartu placeholder. */
+const GALLERY_PHOTOS = [];
+
+const WA_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 0 0-8.6 15L2 22l5.2-1.4A10 10 0 1 0 12 2zm5.3 14.1c-.2.6-1.3 1.2-1.8 1.2-.5.1-1 .2-3.3-.7-2.8-1.1-4.6-4-4.7-4.2-.1-.2-1.1-1.5-1.1-2.8s.7-2 1-2.3c.2-.3.5-.3.7-.3h.5c.2 0 .4 0 .6.5l.8 2c.1.2.1.4 0 .5l-.4.6c-.1.2-.3.3-.1.6.2.3.8 1.3 1.7 2.1 1.2 1 2.2 1.4 2.5 1.5.3.1.5.1.7-.1l1-1.2c.2-.3.4-.2.6-.1l1.9.9c.3.1.5.2.5.3.1.2.1.8-.1 1.4z"/></svg>';
+
+/* Warna swatch di halaman detail. Kalau varian punya field `hex`, itu yang dipakai lebih dulu. */
+const COLOR_HEX = {
+  brown: '#B08560', aurora: '#C934E0', ruby: '#A3262A', red: '#B3262B', pink: '#E8A0B4',
+  rose: '#D9A0A0', 'rose gold': '#C9967A', gold: '#C9A24B', silver: '#C4C4C4', white: '#F4F1EA',
+  black: '#222', purple: '#7B2D8E', blue: '#4F7CAC', green: '#4F8A6B', pastel: '#E7D3E6',
+  clear: '#E8E4DC', peach: '#F0B99B', lilac: '#BFA3D6',
+};
+
+function swatchColor(product, name) {
+  const variant = product.variants.find((v) => v.color === name);
+  return (variant && variant.hex) || COLOR_HEX[String(name).toLowerCase()] || product.color || '#D9C9A8';
+}
+
+/* Dipakai saat klik menu Gallery/Kontak dari halaman selain beranda */
+let pendingScroll = null;
+
 
 /* ===== Keranjang ===== */
 
@@ -25,7 +46,12 @@ try {
 
 function saveCart() {
   localStorage.setItem(CART_KEY, JSON.stringify(cart));
-  $('#cnt').textContent = cart.reduce((sum, item) => sum + item.qty, 0);
+  const counter = $('#cnt');
+  if (counter) {
+    const total = cart.reduce((sum, item) => sum + item.qty, 0);
+    counter.textContent = total;
+    counter.hidden = total === 0;
+  }
 }
 
 function cartTotal() {
@@ -45,7 +71,7 @@ function whatsappLink(number, text) {
 function pageHeader(eyebrow, title, subtitle) {
   return `
     <div class="hd">
-      <div class="eb">${eyebrow}</div>
+      ${eyebrow ? `<div class="eb">${eyebrow}</div>` : ''}
       <h1>${title}</h1>
       <div class="rule"></div>
       ${subtitle ? `<p class="sub">${subtitle}</p>` : ''}
@@ -64,15 +90,148 @@ function productCard(product) {
     <a class="card" href="#/produk/${product.id}">
       <div class="ph" style="--c:${product.color}">${escapeHtml(product.name[0])}</div>
       <h3>${escapeHtml(product.name)}</h3>
-      <span class="price">${formatRupiah(product.price)}</span> ${stockTag(product)}
+      <span class="price">${formatRupiahCard(product.price)}</span> ${stockTag(product)}
     </a>`;
 }
 
-function whatsappCatalogButtons() {
-  const message = 'Halo, saya tertarik dengan katalog produk SAEVÉ dan ingin bertanya lebih lanjut.';
-  return WA_CONTACTS.map((contact) => `
-    <a class="btn" target="_blank" rel="noopener" href="${whatsappLink(contact.number, message)}">Pesan · ${contact.name}</a>
-  `).join('');
+
+/* ===== Galeri (carousel) ===== */
+
+function galleryHtml() {
+  const cards = GALLERY_PHOTOS.length
+    ? GALLERY_PHOTOS.map((src) => `<div class="car-card"><img src="${escapeHtml(src)}" alt="" loading="lazy"></div>`)
+    : Array.from({ length: 6 }, () => '<div class="car-card"></div>');
+  const pages = Math.ceil(cards.length / 3);
+  const dots = Array.from({ length: pages }, (_, i) => `<i class="${i === 0 ? 'on' : ''}"></i>`).join('');
+
+  return `
+    <div class="car">
+      <div class="car-track">${cards.join('')}</div>
+      <button class="car-btn prev" aria-label="Sebelumnya"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M15 5l-7 7 7 7"/></svg></button>
+      <button class="car-btn next" aria-label="Berikutnya"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 5l7 7-7 7"/></svg></button>
+    </div>
+    <div class="dots">${dots}</div>`;
+}
+
+function initGallery() {
+  const track = $('.car-track');
+  if (!track) return;
+  const step = () => track.clientWidth + 14;
+
+  $('.car-btn.prev').onclick = () => track.scrollBy({ left: -step(), behavior: 'smooth' });
+  $('.car-btn.next').onclick = () => track.scrollBy({ left: step(), behavior: 'smooth' });
+  track.onscroll = () => {
+    const index = Math.round(track.scrollLeft / step());
+    $$('.dots i').forEach((dot, i) => dot.classList.toggle('on', i === index));
+  };
+}
+
+
+/* ===== Panel keranjang "Pesanan Anda" (drawer dari kanan) ===== */
+
+const CLOSE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M5 5l14 14M19 5L5 19"/></svg>';
+
+function ensureDrawer() {
+  let drawer = $('#drawer');
+  if (drawer) return drawer;
+
+  drawer = document.createElement('div');
+  drawer.id = 'drawer';
+  drawer.className = 'drawer-back';
+  drawer.innerHTML = `
+    <aside class="drawer" role="dialog" aria-label="Pesanan Anda">
+      <header class="dr-head">
+        <h2>Pesanan Anda</h2>
+        <button type="button" class="dr-close" aria-label="Tutup">${CLOSE_ICON}</button>
+      </header>
+      <div class="dr-list" id="drList"></div>
+      <footer class="dr-foot" id="drFoot"></footer>
+    </aside>`;
+  document.body.appendChild(drawer);
+
+  drawer.addEventListener('click', onDrawerClick);
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') closeCart();
+  });
+  return drawer;
+}
+
+function renderDrawer() {
+  const items = cart.map((item, index) => {
+    const found = API.findVariant(item.variantId);
+    if (!found) return '';
+    const { product, variant } = found;
+    return `
+      <div class="dr-item">
+        <div class="dr-top">
+          <div>
+            <div class="dr-name">${escapeHtml(product.name)}</div>
+            <div class="dr-var">${variantLabel(variant.color, variant.size)}</div>
+          </div>
+          <button type="button" class="dr-del" data-dr-del="${index}">Hapus</button>
+        </div>
+        <div class="dr-bot">
+          <div class="qty">
+            <button type="button" data-dr-dec="${index}" aria-label="Kurangi">−</button>
+            <span>${item.qty}</span>
+            <button type="button" data-dr-inc="${index}" aria-label="Tambah">+</button>
+          </div>
+          <span class="price">${formatRupiah(product.price * item.qty)}</span>
+        </div>
+      </div>`;
+  }).join('');
+
+  $('#drList').innerHTML = cart.length ? items : '<p class="sub center dr-empty">Keranjang masih kosong.</p>';
+  $('#drFoot').innerHTML = cart.length
+    ? `
+      <div class="dr-sum"><span>Subtotal</span><span class="price">${formatRupiah(cartTotal())}</span></div>
+      <p class="dr-note">Ongkir ditetapkan admin setelah pesanan dibuat</p>
+      <a class="btn pri dr-go" href="#/checkout" data-dr-go>Lanjut ke checkout</a>`
+    : '<a class="btn pri dr-go" href="#/koleksi" data-dr-go>Lihat koleksi</a>';
+}
+
+function onDrawerClick(event) {
+  const target = event.target;
+
+  if (target.id === 'drawer' || target.closest('.dr-close') || target.closest('[data-dr-go]')) {
+    closeCart();
+    return; // link checkout/koleksi tetap berjalan
+  }
+
+  const dec = target.closest('[data-dr-dec]');
+  const inc = target.closest('[data-dr-inc]');
+  const del = target.closest('[data-dr-del]');
+
+  if (dec) {
+    const item = cart[+dec.dataset.drDec];
+    if (item) item.qty = Math.max(1, item.qty - 1);
+  } else if (inc) {
+    const item = cart[+inc.dataset.drInc];
+    const found = item && API.findVariant(item.variantId);
+    if (found && item.qty + 1 > found.variant.stock) return showToast('Stok tidak cukup');
+    if (item) item.qty += 1;
+  } else if (del) {
+    cart.splice(+del.dataset.drDel, 1);
+  } else {
+    return;
+  }
+
+  saveCart();
+  renderDrawer();
+}
+
+function openCart() {
+  const drawer = ensureDrawer();
+  renderDrawer();
+  document.body.classList.add('lock');
+  requestAnimationFrame(() => drawer.classList.add('open'));
+}
+
+function closeCart() {
+  const drawer = $('#drawer');
+  if (!drawer) return;
+  drawer.classList.remove('open');
+  document.body.classList.remove('lock');
 }
 
 
@@ -81,12 +240,20 @@ function whatsappCatalogButtons() {
  */
 
 const views = {
-  /* ---- Beranda: pratinjau katalog PDF ---- */
+  /* ---- Beranda: pratinjau katalog PDF, galeri, kontak ---- */
   home() {
-    return pageHeader('2026', 'SAEVÉ Catalog', 'Jelajahi seluruh koleksi kami dalam satu halaman.') + `
+    const waMessage = 'Halo, saya tertarik dengan katalog produk SAEVÉ dan ingin bertanya lebih lanjut.';
+
+    return pageHeader('', 'SAEVÉ Catalog', 'Jelajahi seluruh koleksi kami dalam satu halaman.') + `
+      <div id="viewer">
       <div class="frame" id="pbox">
         <div class="pwrap"><canvas id="pdf"></canvas></div>
       </div>
+
+      <a class="btn dl" href="${CATALOG_PDF_URL}" download>
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 20h16"/></svg>
+        Unduh katalog (PDF)
+      </a>
 
       <div class="ctl">
         <button id="pprev" aria-label="Sebelumnya">‹</button>
@@ -99,22 +266,31 @@ const views = {
         <i></i>
         <button id="pfs" aria-label="Layar penuh">⛶</button>
       </div>
-
-      <p class="sub center">Gunakan panah untuk membaca antar halaman, atau unduh berkas lengkapnya ke perangkat Anda.</p>
-
-      <div class="acts">
-        <a class="btn pri" href="#/koleksi">Lihat koleksi</a>
-        <a class="btn" href="${CATALOG_PDF_URL}" download>Unduh katalog (PDF)</a>
-        ${whatsappCatalogButtons()}
       </div>
 
-      <section class="gallery">
+      <p class="sub center hint">Gunakan panah untuk membaca antar halaman, atau unduh berkas lengkapnya ke perangkat Anda.</p>
+
+      <section class="gallery" id="gallery">
         <div class="hd">
-          <div class="eb">SAEV${BRAND_E}</div>
+          <div class="eb">SAEVÉ</div>
           <h2>Gallery</h2>
           <div class="rule"></div>
         </div>
-        <p class="sub center">Belum ada foto di galeri.</p>
+        ${galleryHtml()}
+      </section>
+
+      <section class="kontak-sec" id="kontak">
+        <div class="hd">
+          <h2>Kontak</h2>
+          <div class="rule"></div>
+        </div>
+        <div class="kontak">
+          ${WA_CONTACTS.map((contact) => `
+            <a class="wa" target="_blank" rel="noopener" href="${whatsappLink(contact.number, waMessage)}">
+              ${WA_ICON}
+              <div><b>Chat ${contact.name}</b><span>${contact.display}</span></div>
+            </a>`).join('')}
+        </div>
       </section>`;
   },
 
@@ -127,9 +303,10 @@ const views = {
     const cards = API.getProducts(category).map(productCard).join('')
       || '<p class="sub">Produk tidak ditemukan.</p>';
 
-    return pageHeader('Koleksi', 'Perhiasan SAEVÉ') + `
+    return `<div class="page-koleksi">` + pageHeader('SAEVÉ', 'Koleksi', 'Perhiasan handmade dengan manik kristal dan rantai rose gold.') + `
       <div class="pills">${pills}</div>
-      <div class="grid">${cards}</div>`;
+      <div class="grid">${cards}</div>
+      </div>`;
   },
 
   /* ---- Detail produk ---- */
@@ -137,25 +314,38 @@ const views = {
     const product = API.getProduct(params[0]);
     if (!product) return '<p>Produk tidak ditemukan.</p>';
 
-    const options = product.variants.map((variant) => `
-      <option value="${variant.id}" ${variant.stock ? '' : 'disabled'}>${variantLabel(variant.color, variant.size)} — ${variant.stock ? 'stok ' + variant.stock : 'habis'}</option>
+    const colors = [...new Set(product.variants.map((variant) => variant.color))];
+    const hasSizes = product.variants.some((variant) => variant.size);
+    const swatches = colors.map((name) => `
+      <button type="button" class="sw" data-color="${escapeHtml(name)}" style="--c:${swatchColor(product, name)}" aria-label="${escapeHtml(name)}" title="${escapeHtml(name)}"></button>
     `).join('');
 
     return `
-      <div class="two">
-        <div class="frame full">
-          <div class="ph big" style="--c:${product.color}">${escapeHtml(product.name[0])}</div>
-        </div>
-        <div>
-          <div class="eb">${categoryLabel(product.category)}</div>
-          <h1 class="left">${escapeHtml(product.name)}</h1>
+      <div class="pd" id="pd" data-id="${product.id}">
+        <div class="pd-img"></div>
+        <div class="pd-info">
+          <div class="pd-cat">${categoryLabel(product.category)}</div>
+          <h1>${escapeHtml(product.name)}</h1>
           <div class="price lg">${formatRupiah(product.price)}</div>
-          <p>${escapeHtml(product.description)}</p>
-          <p class="sub">Bahan: ${escapeHtml(product.material)}</p>
+          <p class="pd-desc">${escapeHtml(product.description)}</p>
+          <p class="pd-mat">Bahan: ${escapeHtml(product.material)}</p>
 
-          <div class="fl">Varian<select id="vr">${options}</select></div>
-          <div class="fl">Jumlah<input id="qt" class="input-qty" type="number" min="1" value="1"></div>
-          <button class="btn pri" id="add">TAMBAH KE PESANAN</button>
+          <div class="pd-lbl">Warna</div>
+          <div class="pd-sw">${swatches}</div>
+          <div class="pd-cn" id="pcn"></div>
+
+          ${hasSizes ? '<div class="pd-lbl">Ukuran</div><div class="pd-sizes" id="psz"></div>' : ''}
+
+          <div class="pd-qty">
+            <div class="qty">
+              <button type="button" id="qm" aria-label="Kurangi">−</button>
+              <span id="qn">1</span>
+              <button type="button" id="qp" aria-label="Tambah">+</button>
+            </div>
+            <span class="pd-stock" id="pst"></span>
+          </div>
+
+          <button type="button" class="btn pri cta" id="add">TAMBAH KE PESANAN</button>
         </div>
       </div>`;
   },
@@ -192,38 +382,69 @@ const views = {
     if (!cart.length) return views.keranjang();
 
     const summaryRows = cart.map((item) => {
-      const { product } = API.findVariant(item.variantId);
+      const { product, variant } = API.findVariant(item.variantId);
       return `
-        <div class="sum">
-          <span>${escapeHtml(product.name)} × ${item.qty}</span>
-          <span>${formatRupiah(product.price * item.qty)}</span>
+        <div class="ck-item">
+          <div class="ck-row"><span>${escapeHtml(product.name)}</span><span>${formatRupiahDot(product.price * item.qty)}</span></div>
+          <div class="ck-var">${variantLabel(variant.color, variant.size)} x ${item.qty}</div>
         </div>`;
     }).join('');
 
-    return pageHeader('Checkout', 'Data pemesan') + `
-      <div class="two">
-        <form id="co" class="box" novalidate>
-          <div class="fl">Nama<input name="name"></div>
-          <div class="fl">No. WhatsApp<input name="phone" placeholder="08xx xxxx xxxx"></div>
-          <div class="fl">Penerimaan
-            <select name="delivery">
-              <option value="kirim">Dikirim (ongkir ditetapkan admin)</option>
-              <option value="pickup">Ambil di toko</option>
-            </select>
+    return `
+      <div class="ck">
+        <form id="co" class="ck-form" novalidate>
+          <h1>Checkout</h1>
+          <p class="sub">Tanpa akun. Cukup isi data berikut.</p>
+
+          <label class="ck-fl"><span>Nama</span><input name="name" autocomplete="name"></label>
+          <label class="ck-fl"><span>No. WhatsApp</span><input name="phone" inputmode="tel" autocomplete="tel"></label>
+
+          <div class="ck-lbl">Pengambilan</div>
+          <div class="ck-opts">
+            <label class="opt"><input type="radio" name="delivery" value="kirim" checked><span>Dikirim</span></label>
+            <label class="opt"><input type="radio" name="delivery" value="pickup"><span>Ambil di toko</span></label>
           </div>
+
           <div id="ad">
-            <div class="fl">Alamat<input name="address"></div>
-            <div class="fl">Kota/kabupaten<input name="city"></div>
-            <div class="fl">Kode pos<input name="postal"></div>
+            <label class="ck-fl"><span>Alamat</span><textarea name="address" autocomplete="street-address"></textarea></label>
+            <div class="ck-two">
+              <label class="ck-fl"><span>Kota</span><input name="city"></label>
+              <label class="ck-fl"><span>Kode pos</span><input name="postal" inputmode="numeric" maxlength="5"></label>
+            </div>
+            <p class="ck-note">Ongkir ditetapkan admin setelah pesanan dibuat.</p>
           </div>
+
           <div class="err" id="er"></div>
-          <button class="btn pri">BUAT PESANAN</button>
+          <button class="btn pri ck-go">Buat pesanan</button>
         </form>
 
-        <div class="box">
+        <aside class="ck-card">
           <h2>Ringkasan</h2>
           ${summaryRows}
-          <div class="sum t"><span>Subtotal</span><span>${formatRupiah(cartTotal())}</span></div>
+          <div class="ck-line"></div>
+          <div class="ck-sub"><span>Subtotal</span><span>${formatRupiahDot(cartTotal())}</span></div>
+          <p class="ck-pay">Pembayaran manual lewat transfer. Rekening tampil setelah pesanan dibuat.</p>
+        </aside>
+      </div>`;
+  },
+
+  /* ---- Pesanan berhasil dibuat ---- */
+  dibuat(params) {
+    const code = params[0] || '';
+    const order = API.getOrder(code);
+    const shipping = !order || order.delivery === 'kirim';
+    const message = shipping
+      ? 'Admin akan menghubungi Anda untuk menetapkan ongkir.<br>Setelah itu, lakukan pembayaran transfer.'
+      : 'Admin akan menghubungi Anda untuk konfirmasi pengambilan.<br>Setelah itu, lakukan pembayaran transfer.';
+
+    return `
+      <div class="done-wrap">
+        <div class="done">
+          <div class="done-t">Pesanan dibuat</div>
+          <div class="done-code">${escapeHtml(code)}</div>
+          <p class="done-msg">${message}</p>
+          <p class="sub done-sub">Hubungi admin untuk rekening transfer.</p>
+          <a class="btn pri done-go" href="#/struk/${encodeURIComponent(code)}">Cek status pesanan</a>
         </div>
       </div>`;
   },
@@ -294,6 +515,7 @@ const views = {
 /* ===== Router ===== */
 
 async function route() {
+  closeCart();
   const [, name = 'home', ...params] = (location.hash || '#/').slice(1).split('/');
 
   try {
@@ -311,6 +533,13 @@ async function route() {
   app.innerHTML = view(params);
   scrollTo(0, 0);
   bind();
+
+  // Lanjutkan scroll ke Gallery/Kontak kalau datang dari menu navbar
+  if (pendingScroll) {
+    const target = document.getElementById(pendingScroll);
+    pendingScroll = null;
+    if (target) target.scrollIntoView({ behavior: 'smooth' });
+  }
 }
 
 
@@ -318,33 +547,104 @@ async function route() {
 
 function bind() {
   if ($('#pdf')) initPdf();
-  bindAddToCart();
+  initGallery();
+  bindProduct();
   bindCartDelete();
   bindCheckoutForm();
   bindTrackForm();
   bindPrint();
 }
 
-function bindAddToCart() {
-  const button = $('#add');
-  if (!button) return;
+function bindProduct() {
+  const root = $('#pd');
+  if (!root) return;
 
-  button.onclick = () => {
-    const variantId = $('#vr').value;
-    const qty = Math.max(1, +$('#qt').value || 1);
-    const found = API.findVariant(variantId);
-    if (!found) return showToast('Varian tidak tersedia');
+  const product = API.getProduct(root.dataset.id);
+  const variants = product.variants;
+  let color = (variants.find((variant) => variant.stock > 0) || variants[0]).color;
+  let size = null;
+  let qty = 1;
 
-    const existing = cart.find((item) => item.variantId === variantId);
+  const optionsOf = (name) => variants.filter((variant) => variant.color === name);
+  const current = () => optionsOf(color).find((variant) => (variant.size || null) === (size || null));
+
+  function refresh() {
+    // Pilih ukuran yang valid untuk warna ini
+    const options = optionsOf(color);
+    if (options.some((variant) => variant.size)) {
+      const keep = options.find((variant) => variant.size === size && variant.stock > 0);
+      size = (keep || options.find((variant) => variant.stock > 0) || options[0]).size;
+    } else {
+      size = null;
+    }
+
+    $$('.sw').forEach((button) => {
+      button.classList.toggle('on', button.dataset.color === color);
+      button.classList.toggle('out', optionsOf(button.dataset.color).every((variant) => variant.stock === 0));
+    });
+    $('#pcn').textContent = color;
+
+    const sizeBox = $('#psz');
+    if (sizeBox) {
+      sizeBox.innerHTML = options.map((variant) => `
+        <button type="button" class="chip ${variant.size === size ? 'on' : ''}" data-size="${escapeHtml(variant.size)}" ${variant.stock ? '' : 'disabled'}>${escapeHtml(variant.size)}</button>
+      `).join('');
+    }
+
+    const stock = current() ? current().stock : 0;
+    qty = Math.min(Math.max(1, qty), Math.max(1, stock));
+    $('#qn').textContent = qty;
+    $('#pst').textContent = stock ? 'Tersedia ' + stock : 'Habis';
+    $('#add').disabled = !stock;
+  }
+
+  $$('.sw').forEach((button) => {
+    button.onclick = () => {
+      color = button.dataset.color;
+      qty = 1;
+      refresh();
+    };
+  });
+
+  const sizeBox = $('#psz');
+  if (sizeBox) {
+    sizeBox.onclick = (event) => {
+      const chip = event.target.closest('.chip');
+      if (!chip || chip.disabled) return;
+      size = chip.dataset.size;
+      qty = 1;
+      refresh();
+    };
+  }
+
+  $('#qm').onclick = () => {
+    qty = Math.max(1, qty - 1);
+    refresh();
+  };
+  $('#qp').onclick = () => {
+    const stock = current() ? current().stock : 0;
+    if (qty >= stock) return showToast('Stok tidak cukup');
+    qty += 1;
+    refresh();
+  };
+
+  $('#add').onclick = () => {
+    const variant = current();
+    if (!variant) return showToast('Varian tidak tersedia');
+
+    const variantId = String(variant.id);
+    const existing = cart.find((item) => String(item.variantId) === variantId);
     const newQty = (existing ? existing.qty : 0) + qty;
-    if (newQty > found.variant.stock) return showToast('Stok tidak cukup');
+    if (newQty > variant.stock) return showToast('Stok tidak cukup');
 
     if (existing) existing.qty = newQty;
     else cart.push({ variantId, qty });
 
     saveCart();
-    showToast('Ditambahkan ke pesanan');
+    openCart();
   };
+
+  refresh();
 }
 
 function bindCartDelete() {
@@ -363,9 +663,9 @@ function bindCheckoutForm() {
 
   // Alamat hanya perlu diisi kalau pesanan dikirim
   const addressBox = $('#ad');
-  form.elements.delivery.onchange = () => {
+  form.addEventListener('change', () => {
     addressBox.style.display = form.elements.delivery.value === 'kirim' ? '' : 'none';
-  };
+  });
 
   form.onsubmit = async (event) => {
     event.preventDefault();
@@ -390,7 +690,7 @@ function bindCheckoutForm() {
       const order = await API.createOrder(data, cart);
       cart = [];
       saveCart();
-      location.hash = '#/struk/' + order.code;
+      location.hash = '#/dibuat/' + order.code;
     } catch (error) {
       errorBox.textContent = error.message;
     }
@@ -418,13 +718,30 @@ function bindPrint() {
 }
 
 
-/* ===== Pratinjau katalog PDF ===== */
+/* ===== Pratinjau katalog PDF =====
+ * Zoom 100% = seluruh halaman muat di bingkai (tanpa scroll).
+ * Zoom di atas 100% = bingkai tetap, isi digeser dengan drag/swipe.
+ */
 
 let pdfDoc = null;
 let pdfPage = 1;
 let pdfZoom = 1;
 let pdfRendering = false;
 let pdfRenderAgain = false;
+let pdfResetScroll = false;
+let pdfEventsReady = false;
+
+const PDF_MIN_ZOOM = 1;
+const PDF_MAX_ZOOM = 3;
+const PDF_ZOOM_STEP = 0.25;
+
+/* Ukuran maksimum area halaman supaya satu halaman utuh selalu muat */
+function pdfBounds() {
+  if (document.fullscreenElement === $('#viewer')) {
+    return { w: innerWidth - 80, h: innerHeight - 160 };
+  }
+  return { w: Math.min(app.clientWidth - 60, 540), h: innerHeight * 0.72 };
+}
 
 async function renderPdfPage() {
   const canvas = $('#pdf');
@@ -439,16 +756,44 @@ async function renderPdfPage() {
 
   try {
     const page = await pdfDoc.getPage(pdfPage);
-    const containerWidth = canvas.parentNode.clientWidth;
-    const baseViewport = page.getViewport({ scale: 1 });
-    const viewport = page.getViewport({ scale: (containerWidth / baseViewport.width) * 2 });
+    const base = page.getViewport({ scale: 1 });
+    const bounds = pdfBounds();
+    const fit = Math.min(bounds.w / base.width, bounds.h / base.height);
+    const cssW = base.width * fit;
+    const cssH = base.height * fit;
+    const wrap = canvas.parentNode;
 
-    canvas.width = viewport.width;
-    canvas.height = viewport.height;
-    canvas.style.width = pdfZoom * 100 + '%';
+    // Ingat titik tengah yang sedang dilihat supaya zoom terasa natural
+    const oldW = canvas.clientWidth;
+    const oldH = canvas.clientHeight;
+    const cx = oldW ? (wrap.scrollLeft + wrap.clientWidth / 2) / oldW : 0.5;
+    const cy = oldH ? (wrap.scrollTop + wrap.clientHeight / 2) / oldH : 0.5;
+
+    // Bingkai selalu seukuran satu halaman utuh
+    wrap.style.width = cssW + 'px';
+    wrap.style.height = cssH + 'px';
+    canvas.style.width = cssW * pdfZoom + 'px';
+    canvas.style.height = cssH * pdfZoom + 'px';
+
+    // Resolusi canvas mengikuti zoom supaya tetap tajam
+    const ratio = Math.min(window.devicePixelRatio || 1, 2);
+    const scale = Math.min(fit * pdfZoom * ratio, 4096 / base.width);
+    const viewport = page.getViewport({ scale });
+    canvas.width = Math.floor(viewport.width);
+    canvas.height = Math.floor(viewport.height);
 
     await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
 
+    if (pdfResetScroll) {
+      wrap.scrollLeft = 0;
+      wrap.scrollTop = 0;
+      pdfResetScroll = false;
+    } else {
+      wrap.scrollLeft = cx * canvas.clientWidth - wrap.clientWidth / 2;
+      wrap.scrollTop = cy * canvas.clientHeight - wrap.clientHeight / 2;
+    }
+
+    wrap.classList.toggle('zoomed', pdfZoom > 1);
     $('#pgn').textContent = 'Hal. ' + pdfPage + ' / ' + pdfDoc.numPages;
     $('#zm').textContent = Math.round(pdfZoom * 100) + '%';
   } catch (error) {
@@ -462,27 +807,101 @@ async function renderPdfPage() {
   }
 }
 
+function pdfGo(delta) {
+  if (!pdfDoc) return;
+  const next = Math.min(pdfDoc.numPages, Math.max(1, pdfPage + delta));
+  if (next === pdfPage) return;
+  pdfPage = next;
+  pdfResetScroll = true;
+  renderPdfPage();
+}
+
+/* Dipasang sekali saja: resize, layar penuh, geser, scroll, dan keyboard */
+function initPdfEvents() {
+  if (pdfEventsReady) return;
+  pdfEventsReady = true;
+
+  let resizeTimer;
+  addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(renderPdfPage, 150);
+  });
+  document.addEventListener('fullscreenchange', () => {
+    pdfZoom = 1;
+    pdfResetScroll = true;
+    renderPdfPage();
+  });
+
+  // Layar penuh + zoom 100%: scroll/swipe = pindah halaman
+  let wheelLock = false;
+  document.addEventListener('wheel', (event) => {
+    if (document.fullscreenElement !== $('#viewer') || pdfZoom > 1) return;
+    event.preventDefault();
+    if (wheelLock || Math.abs(event.deltaY) < 10) return;
+    wheelLock = true;
+    setTimeout(() => (wheelLock = false), 450);
+    pdfGo(event.deltaY > 0 ? 1 : -1);
+  }, { passive: false });
+
+  let touchY = null;
+  document.addEventListener('touchstart', (event) => {
+    touchY = event.touches[0].clientY;
+  }, { passive: true });
+  document.addEventListener('touchend', (event) => {
+    if (touchY === null) return;
+    const diff = touchY - event.changedTouches[0].clientY;
+    touchY = null;
+    if (document.fullscreenElement !== $('#viewer') || pdfZoom > 1 || Math.abs(diff) < 60) return;
+    pdfGo(diff > 0 ? 1 : -1);
+  }, { passive: true });
+
+  // Panah keyboard
+  document.addEventListener('keydown', (event) => {
+    if (!$('#pdf') || event.target.closest('input, select, textarea')) return;
+    if (event.key === 'ArrowRight' || event.key === 'PageDown') pdfGo(1);
+    if (event.key === 'ArrowLeft' || event.key === 'PageUp') pdfGo(-1);
+  });
+
+  let drag = null;
+  document.addEventListener('pointerdown', (event) => {
+    const wrap = event.target.closest('.pwrap');
+    if (!wrap || event.pointerType !== 'mouse' || pdfZoom <= 1) return;
+    drag = { wrap, x: event.clientX, y: event.clientY, left: wrap.scrollLeft, top: wrap.scrollTop };
+    wrap.classList.add('dragging');
+    event.preventDefault();
+  });
+  document.addEventListener('pointermove', (event) => {
+    if (!drag) return;
+    drag.wrap.scrollLeft = drag.left - (event.clientX - drag.x);
+    drag.wrap.scrollTop = drag.top - (event.clientY - drag.y);
+  });
+  const endDrag = () => {
+    if (drag) drag.wrap.classList.remove('dragging');
+    drag = null;
+  };
+  document.addEventListener('pointerup', endDrag);
+  document.addEventListener('pointercancel', endDrag);
+}
+
 async function initPdf() {
   const box = $('#pbox');
+  initPdfEvents();
 
-  $('#pprev').onclick = () => {
-    pdfPage = Math.max(1, pdfPage - 1);
-    renderPdfPage();
-  };
-  $('#pnext').onclick = () => {
-    if (!pdfDoc) return;
-    pdfPage = Math.min(pdfDoc.numPages, pdfPage + 1);
-    renderPdfPage();
-  };
+  $('#pprev').onclick = () => pdfGo(-1);
+  $('#pnext').onclick = () => pdfGo(1);
   $('#pzo').onclick = () => {
-    pdfZoom = Math.max(0.5, pdfZoom - 0.25);
+    pdfZoom = Math.max(PDF_MIN_ZOOM, pdfZoom - PDF_ZOOM_STEP);
     renderPdfPage();
   };
   $('#pzi').onclick = () => {
-    pdfZoom = Math.min(2.5, pdfZoom + 0.25);
+    pdfZoom = Math.min(PDF_MAX_ZOOM, pdfZoom + PDF_ZOOM_STEP);
     renderPdfPage();
   };
-  $('#pfs').onclick = () => box.requestFullscreen && box.requestFullscreen();
+  $('#pfs').onclick = () => {
+    const viewer = $('#viewer');
+    if (document.fullscreenElement) document.exitFullscreen();
+    else if (viewer.requestFullscreen) viewer.requestFullscreen();
+  };
 
   try {
     if (!pdfDoc) {
@@ -499,5 +918,28 @@ async function initPdf() {
 /* ===== Mulai ===== */
 
 addEventListener('hashchange', route);
+
+// Menu Gallery & Kontak: scroll ke section (pindah ke beranda dulu kalau sedang di halaman lain)
+document.addEventListener('click', (event) => {
+  // Tombol ORDERS (pojok kanan bawah) membuka panel keranjang
+  if (event.target.closest('#fab')) {
+    event.preventDefault();
+    openCart();
+    return;
+  }
+
+  const link = event.target.closest('[data-goto]');
+  if (!link) return;
+  event.preventDefault();
+
+  const onHome = !location.hash || location.hash === '#/' || location.hash === '#';
+  if (onHome) {
+    document.getElementById(link.dataset.goto)?.scrollIntoView({ behavior: 'smooth' });
+  } else {
+    pendingScroll = link.dataset.goto;
+    location.hash = '#/';
+  }
+});
+
 saveCart();
 route();

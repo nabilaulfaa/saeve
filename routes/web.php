@@ -27,5 +27,7 @@ Route::prefix('staff')->group(function () {
         Route::post('products', [StaffController::class, 'createProduct']);
         Route::post('variants/{variant}/stock', [StaffController::class, 'stock']);
         Route::get('report', [StaffController::class, 'report']);
+        Route::post('products/{product}/photos', [StaffController::class, 'uploadPhotos']);
+        Route::delete('photos/{photo}', [StaffController::class, 'deletePhoto']);
     });
 });

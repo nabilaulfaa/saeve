@@ -10,4 +10,9 @@ class Product extends Model
     {
         return $this->hasMany(ProductVariant::class);
     }
+
+    public function photos()
+    {
+        return $this->hasMany(ProductPhoto::class)->orderBy('position')->orderBy('id');
+    }
 }
