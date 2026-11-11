@@ -228,10 +228,9 @@ function openCart() {
 }
 
 function closeCart() {
-  const drawer = $('#drawer');
-  if (!drawer) return;
-  drawer.classList.remove('open');
   document.body.classList.remove('lock');
+  const drawer = $('#drawer');
+  if (drawer) drawer.classList.remove('open');
 }
 
 
@@ -735,9 +734,15 @@ const PDF_MIN_ZOOM = 1;
 const PDF_MAX_ZOOM = 3;
 const PDF_ZOOM_STEP = 0.25;
 
+/* True hanya kalau viewer PDF ada di halaman DAN sedang layar penuh */
+function pdfIsFullscreen() {
+  const viewer = $('#viewer');
+  return !!viewer && document.fullscreenElement === viewer;
+}
+
 /* Ukuran maksimum area halaman supaya satu halaman utuh selalu muat */
 function pdfBounds() {
-  if (document.fullscreenElement === $('#viewer')) {
+  if (pdfIsFullscreen()) {
     return { w: innerWidth - 80, h: innerHeight - 160 };
   }
   return { w: Math.min(app.clientWidth - 60, 540), h: innerHeight * 0.72 };
@@ -835,7 +840,7 @@ function initPdfEvents() {
   // Layar penuh + zoom 100%: scroll/swipe = pindah halaman
   let wheelLock = false;
   document.addEventListener('wheel', (event) => {
-    if (document.fullscreenElement !== $('#viewer') || pdfZoom > 1) return;
+    if (!pdfIsFullscreen() || pdfZoom > 1) return;
     event.preventDefault();
     if (wheelLock || Math.abs(event.deltaY) < 10) return;
     wheelLock = true;
@@ -851,7 +856,7 @@ function initPdfEvents() {
     if (touchY === null) return;
     const diff = touchY - event.changedTouches[0].clientY;
     touchY = null;
-    if (document.fullscreenElement !== $('#viewer') || pdfZoom > 1 || Math.abs(diff) < 60) return;
+    if (!pdfIsFullscreen() || pdfZoom > 1 || Math.abs(diff) < 60) return;
     pdfGo(diff > 0 ? 1 : -1);
   }, { passive: true });
 
