@@ -8,15 +8,20 @@ use App\Models\ProductVariant;
 use App\Models\Voucher;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 
 class StoreController extends Controller
 {
     public function products()
     {
-        return Product::with('variants')->orderBy('id')->get()->map(fn ($p) => [
+        return Product::with(['variants', 'photos'])->orderBy('id')->get()->map(fn ($p) => [
             'id' => $p->id, 'name' => $p->name, 'category' => $p->category, 'price' => $p->price,
             'weight' => (int) $p->weight, 'material' => $p->material, 'description' => $p->description, 'color' => $p->swatch,
+            'photos' => $p->photos->map(fn ($photo) => [
+                'id' => $photo->id,
+                'url' => Storage::disk('public')->url($photo->path),
+            ])->values(),
             'variants' => $p->variants->map(fn ($v) => [
                 'id' => $v->id, 'color' => $v->color, 'size' => $v->size, 'stock' => $v->stock,
             ])->values(),

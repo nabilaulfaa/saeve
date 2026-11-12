@@ -1840,3 +1840,53 @@ body.lock {
     border-radius: 18px;
   }
 }
+
+/* ===== Foto produk dari admin (tempel di PALING BAWAH style.css) ===== */
+.ph { overflow: hidden; }
+
+.ph img,
+.pd-img img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.pd-img { overflow: hidden; }
+
+.pd-gal { margin-top: 46px; }
+.pd-gal .pd-img { margin-top: 0; }
+
+.pd-thumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.pd-th {
+  width: 64px;
+  aspect-ratio: 1;
+  padding: 0;
+  border: 1px solid var(--line);
+  background: var(--soft);
+  cursor: pointer;
+  overflow: hidden;
+  opacity: .7;
+}
+
+.pd-th.on {
+  border-color: var(--gold);
+  opacity: 1;
+}
+
+.pd-th img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+@media (max-width: 760px) {
+  .pd-gal { margin-top: 0; }
+}

@@ -13,7 +13,8 @@ const PDFJS_WORKER_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174
 const CATALOG_CATEGORIES = ['semua', ...PRODUCT_CATEGORIES];
 const ORDER_STEPS = ['menunggu_ongkir', 'menunggu_bayar', 'diproses', 'dikirim', 'selesai'];
 
-/* Isi dengan path foto galeri, contoh: ['/saeve/img/g1.jpg', ...]. Kosong = kartu placeholder. */
+/* Isi dengan path foto galeri, contoh: ['/saeve/img/g1.jpg', ...].
+ * Kosong = otomatis memakai foto produk dari admin; kalau belum ada foto, kartu placeholder. */
 const GALLERY_PHOTOS = [];
 
 const WA_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 0 0-8.6 15L2 22l5.2-1.4A10 10 0 1 0 12 2zm5.3 14.1c-.2.6-1.3 1.2-1.8 1.2-.5.1-1 .2-3.3-.7-2.8-1.1-4.6-4-4.7-4.2-.1-.2-1.1-1.5-1.1-2.8s.7-2 1-2.3c.2-.3.5-.3.7-.3h.5c.2 0 .4 0 .6.5l.8 2c.1.2.1.4 0 .5l-.4.6c-.1.2-.3.3-.1.6.2.3.8 1.3 1.7 2.1 1.2 1 2.2 1.4 2.5 1.5.3.1.5.1.7-.1l1-1.2c.2-.3.4-.2.6-.1l1.9.9c.3.1.5.2.5.3.1.2.1.8-.1 1.4z"/></svg>';
@@ -88,10 +89,14 @@ function stockTag(product) {
   return '';
 }
 
+/* Kartu produk: pakai foto pertama dari admin; kalau belum ada, huruf pertama nama produk */
 function productCard(product) {
+  const cover = (product.photos || [])[0];
   return `
     <a class="card" href="#/produk/${product.id}">
-      <div class="ph" style="--c:${product.color}">${escapeHtml(product.name[0])}</div>
+      <div class="ph" style="--c:${product.color}">${cover
+        ? `<img src="${escapeHtml(cover.url)}" alt="${escapeHtml(product.name)}" loading="lazy">`
+        : escapeHtml(product.name[0])}</div>
       <h3>${escapeHtml(product.name)}</h3>
       <span class="price">${formatRupiahCard(product.price)}</span> ${stockTag(product)}
     </a>`;
@@ -101,8 +106,14 @@ function productCard(product) {
 /* ===== Galeri (carousel) ===== */
 
 function galleryHtml() {
-  const cards = GALLERY_PHOTOS.length
-    ? GALLERY_PHOTOS.map((src) => `<div class="car-card"><img src="${escapeHtml(src)}" alt="" loading="lazy"></div>`)
+  // Otomatis: satu foto sampul dari tiap produk (maks. 9), kecuali GALLERY_PHOTOS diisi manual
+  const auto = API.getProducts('semua')
+    .flatMap((product) => (product.photos || []).slice(0, 1).map((photo) => photo.url))
+    .slice(0, 9);
+  const photos = GALLERY_PHOTOS.length ? GALLERY_PHOTOS : auto;
+
+  const cards = photos.length
+    ? photos.map((src) => `<div class="car-card"><img src="${escapeHtml(src)}" alt="" loading="lazy"></div>`)
     : Array.from({ length: 6 }, () => '<div class="car-card"></div>');
   const pages = Math.ceil(cards.length / 3);
   const dots = Array.from({ length: pages }, (_, i) => `<i class="${i === 0 ? 'on' : ''}"></i>`).join('');
@@ -438,9 +449,20 @@ const views = {
       <button type="button" class="sw" data-color="${escapeHtml(name)}" style="--c:${swatchColor(product, name)}" aria-label="${escapeHtml(name)}" title="${escapeHtml(name)}"></button>
     `).join('');
 
+    // Foto produk dari admin: foto utama + thumbnail kalau lebih dari satu
+    const photos = product.photos || [];
+    const gallery = `
+      <div class="pd-gal">
+        <div class="pd-img">${photos[0]
+          ? `<img id="pimg" src="${escapeHtml(photos[0].url)}" alt="${escapeHtml(product.name)}">`
+          : ''}</div>
+        ${photos.length > 1 ? `<div class="pd-thumbs">${photos.map((photo, index) => `
+          <button type="button" class="pd-th ${index === 0 ? 'on' : ''}" data-src="${escapeHtml(photo.url)}" aria-label="Foto ${index + 1}"><img src="${escapeHtml(photo.url)}" alt=""></button>`).join('')}</div>` : ''}
+      </div>`;
+
     return `
       <div class="pd" id="pd" data-id="${product.id}">
-        <div class="pd-img"></div>
+        ${gallery}
         <div class="pd-info">
           <div class="pd-cat">${categoryLabel(product.category)}</div>
           <h1>${escapeHtml(product.name)}</h1>
@@ -683,6 +705,14 @@ function bind() {
 function bindProduct() {
   const root = $('#pd');
   if (!root) return;
+
+  // Klik thumbnail = ganti foto utama
+  $$('.pd-th').forEach((button) => {
+    button.onclick = () => {
+      $('#pimg').src = button.dataset.src;
+      $$('.pd-th').forEach((b) => b.classList.toggle('on', b === button));
+    };
+  });
 
   const product = API.getProduct(root.dataset.id);
   const variants = product.variants;
