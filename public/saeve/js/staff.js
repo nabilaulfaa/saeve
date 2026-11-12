@@ -686,7 +686,11 @@ const pos = {
   query: '',
   bill: [],       // item yang sedang dibayar: { variantId, name, color, size, price, qty, max }
   receipt: null,  // struk transaksi yang baru selesai
+  busy: false,    // true selama pembayaran diproses (pembaruan stok otomatis ditunda)
+  panelVisible: false, // panel transaksi sedang terlihat di layar (dipakai untuk menyembunyikan bar bawah)
 };
+
+const POS_REFRESH_MS = 45000; // stok diambil ulang dari server tiap 45 detik
 
 function drawPos() {
   // Setelah bayar: tampilkan struk
@@ -714,8 +718,11 @@ function drawPos() {
         <input id="q" class="srch" placeholder="Cari produk atau kategori" value="${escapeHtml(pos.query)}">
         <div id="res"></div>
       </div>
-      <aside class="box">
-        <h2 class="l">Transaksi</h2>
+      <aside class="box" id="bill-panel">
+        <div class="pos-head">
+          <h2 class="l">Transaksi</h2>
+          <button type="button" class="pos-more" data-a="to-products">+ Tambah barang</button>
+        </div>
         <div id="bill"></div>
         <div class="fl">Pembayaran
           <select id="pay">
@@ -727,15 +734,24 @@ function drawPos() {
         <div class="sum"><span>Kembalian</span><b id="chg">-</b></div>
         <button class="btn pri block" id="go" data-a="pay">BAYAR</button>
       </aside>
+    </div>
+
+    <div class="pos-bar" id="pos-bar" hidden>
+      <span id="pos-bar-info"></span>
+      <button type="button" class="pos-bar-btn" data-a="to-bill">Lihat transaksi</button>
     </div>`;
 
   renderPosResults();
   renderBill();
+  watchPosPanel();
 }
 
-/* Daftar produk di sisi kiri, sudah terfilter oleh kotak pencarian. */
+/* Daftar produk di sisi kiri, sudah terfilter oleh kotak pencarian.
+ * Angka di tiap varian = sisa stok setelah dikurangi yang sudah ada di transaksi.
+ * Varian yang sisanya 0 jadi abu-abu dan tidak bisa diketuk. */
 function renderPosResults() {
   const query = pos.query.toLowerCase();
+  const inBill = new Map(pos.bill.map((item) => [String(item.variantId), item.qty]));
   const matches = pos.products.filter(
     (product) => !query || product.name.toLowerCase().includes(query) || product.category.includes(query)
   );
@@ -743,9 +759,11 @@ function renderPosResults() {
   $('#res').innerHTML = matches.map((product) => `
     <div class="pr">
       <div class="sum"><b>${escapeHtml(product.name)}</b><span>${formatRupiah(product.price)}</span></div>
-      ${product.variants.map((variant) => `
-        <button class="vb" data-a="add" data-p="${product.id}" data-v="${variant.id}" ${variant.stock ? '' : 'disabled'}>${variantLabel(variant.color, variant.size)} · ${variant.stock ? variant.stock : 'habis'}</button>
-      `).join('')}
+      ${product.variants.map((variant) => {
+        const left = variant.stock - (inBill.get(String(variant.id)) || 0);
+        const hint = variant.stock ? 'Semua stok sudah ada di transaksi' : 'Stok habis';
+        return `<button class="vb" data-a="add" data-p="${product.id}" data-v="${variant.id}" ${left > 0 ? '' : `disabled title="${hint}"`}>${variantLabel(variant.color, variant.size)} · ${variant.stock ? left : 'habis'}</button>`;
+      }).join('')}
     </div>
   `).join('') || '<p class="sub">Produk tidak ditemukan.</p>';
 }
@@ -771,6 +789,95 @@ function renderBill() {
   $('#cashw').style.display = isCash ? '' : 'none';
   $('#chg').textContent = isCash && total && cash >= total ? formatRupiah(cash - total) : '-';
   $('#go').disabled = !(pos.bill.length && (!isCash || cash >= total));
+
+  updatePosBar();
+}
+
+/* Tampilkan ulang daftar produk (sisa stok) dan transaksi sekaligus. */
+function renderPosAll() {
+  renderPosResults();
+  renderBill();
+}
+
+
+/* ---- Layar sempit: bar ringkasan di bawah layar ---- */
+
+/* Bar berisi jumlah item + total. Tersembunyi kalau transaksi kosong atau panel transaksi sudah terlihat. */
+function updatePosBar() {
+  const bar = $('#pos-bar');
+  if (!bar) return;
+
+  const count = pos.bill.reduce((sum, item) => sum + item.qty, 0);
+  const total = pos.bill.reduce((sum, item) => sum + item.price * item.qty, 0);
+  $('#pos-bar-info').textContent = `${count} item · ${formatRupiah(total)}`;
+  bar.hidden = !count || pos.panelVisible;
+}
+
+/* Pantau apakah panel transaksi sedang terlihat, supaya bar bawah tidak menutupi tombol BAYAR. */
+let posPanelObserver = null;
+function watchPosPanel() {
+  if (posPanelObserver) posPanelObserver.disconnect();
+  pos.panelVisible = false;
+  if (!('IntersectionObserver' in window)) return;
+
+  posPanelObserver = new IntersectionObserver((entries) => {
+    pos.panelVisible = entries[0].isIntersecting;
+    updatePosBar();
+  }, { threshold: 0.25 });
+  posPanelObserver.observe($('#bill-panel'));
+}
+
+function isNarrowScreen() {
+  return Boolean(window.matchMedia && window.matchMedia('(max-width: 860px)').matches);
+}
+
+/* Notifikasi kecil saat barang ditambahkan. Timer lama dibatalkan supaya ketukan beruntun tidak saling memotong. */
+let posToastTimer = null;
+function posToast(message) {
+  const toast = $('#toast');
+  toast.textContent = message;
+  toast.classList.add('on');
+  clearTimeout(posToastTimer);
+  posToastTimer = setTimeout(() => toast.classList.remove('on'), 1600);
+}
+
+
+/* ---- Stok otomatis mengikuti server ---- */
+
+/* Samakan item di transaksi dengan stok terbaru. Kalau stoknya jadi kurang, jumlahnya dikurangi dan kasir diberi tahu. */
+function syncBillWithStock() {
+  const stockById = new Map();
+  pos.products.forEach((product) => product.variants.forEach((variant) => stockById.set(String(variant.id), variant.stock)));
+
+  const adjusted = [];
+  pos.bill = pos.bill.filter((item) => {
+    const stock = stockById.get(String(item.variantId)) ?? 0;
+    item.max = stock;
+    if (item.qty > stock) {
+      adjusted.push(item.name);
+      item.qty = stock;
+    }
+    return item.qty > 0;
+  });
+
+  if (adjusted.length) showToast('Stok berubah, jumlah disesuaikan: ' + adjusted.join(', '), 3500);
+}
+
+/* Ambil stok terbaru (berkala dan saat tab kasir dibuka lagi). Gagal/offline: diam saja, coba lagi nanti. */
+async function refreshPosStock() {
+  if (pos.receipt || pos.busy || !$('#res')) return;
+
+  let fresh;
+  try {
+    fresh = await staffApi('products');
+  } catch (error) {
+    return;
+  }
+  if (pos.receipt || pos.busy || !$('#res')) return; // keadaan berubah selama menunggu
+
+  pos.products = fresh;
+  syncBillWithStock();
+  renderPosAll();
 }
 
 
@@ -805,7 +912,10 @@ const posActions = {
         max: variant.stock,
       });
     }
-    renderBill();
+    renderPosAll();
+
+    // Di layar sempit panel transaksi ada di bawah, jadi beri tanda bahwa barangnya masuk
+    if (isNarrowScreen()) posToast(`Ditambahkan: ${product.name} · ${variant.color}${variant.size ? ' · ' + variant.size : ''}`);
   },
 
   qty(el) {
@@ -817,19 +927,33 @@ const posActions = {
 
     if (newQty < 1) pos.bill.splice(index, 1);
     else item.qty = newQty;
-    renderBill();
+    renderPosAll();
+  },
+
+  /* Layar sempit: lompat ke panel transaksi / kembali ke daftar produk */
+  'to-bill'() {
+    $('#bill-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  },
+
+  'to-products'() {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   },
 
   async pay() {
     const payment = $('#pay').value;
-    pos.receipt = await staffApi('pos', 'POST', {
-      lines: pos.bill.map((item) => ({ variantId: item.variantId, qty: item.qty })),
-      pay: payment,
-      cash: payment === 'tunai' ? +$('#cash').value : null,
-    });
-    pos.bill = [];
-    pos.products = await staffApi('products');
-    drawPos();
+    pos.busy = true;
+    try {
+      pos.receipt = await staffApi('pos', 'POST', {
+        lines: pos.bill.map((item) => ({ variantId: item.variantId, qty: item.qty })),
+        pay: payment,
+        cash: payment === 'tunai' ? +$('#cash').value : null,
+      });
+      pos.bill = [];
+      pos.products = await staffApi('products');
+      drawPos();
+    } finally {
+      pos.busy = false;
+    }
   },
 };
 
@@ -914,3 +1038,11 @@ safely(async () => {
     drawPos();
   }
 });
+
+/* Kasir: stok diperbarui berkala supaya mengikuti perubahan dari admin dan pesanan online. */
+if (PAGE === 'kasir') {
+  setInterval(refreshPosStock, POS_REFRESH_MS);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) refreshPosStock();
+  });
+}

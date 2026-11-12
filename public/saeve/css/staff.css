@@ -869,8 +869,11 @@ th {
   background: var(--gl);
 }
 
+/* Stok habis, atau seluruh stoknya sudah masuk transaksi: abu-abu dan tidak bisa diketuk */
 .vb:disabled {
-  opacity: .4;
+  border-color: #D8D3CC;
+  background: #EFECE8;
+  color: #A09890;
   cursor: not-allowed;
 }
 
@@ -894,6 +897,99 @@ th {
 .receipt-wrap {
   max-width: 420px;
   margin: 0 auto;
+}
+
+
+/* ===== Kasir: panel transaksi & bar bawah ===== */
+.pos-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* "+ Tambah barang" hanya dipakai di layar sempit */
+.pos-more {
+  display: none;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--gold);
+  font-size: 1rem;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+#bill-panel {
+  scroll-margin-top: 84px; /* supaya tidak tertutup header saat di-scroll ke sini */
+}
+
+.pos-bar {
+  display: none;
+}
+
+/* Layar lebar: panel transaksi ikut menempel di kanan saat daftar produk di-scroll */
+@media (min-width: 861px) {
+  .pos > .box {
+    position: sticky;
+    top: 84px;
+    max-height: calc(100vh - 104px);
+    overflow-y: auto;
+  }
+}
+
+/* Layar sempit (HP, tablet tegak): tombol lebih besar + bar ringkasan di bawah layar */
+@media (max-width: 860px) {
+  .pos-more {
+    display: inline;
+  }
+
+  .pos-bar:not([hidden]) {
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    z-index: 6;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 8px 8px 20px;
+    border-radius: 999px;
+    background: var(--ink);
+    color: var(--gl);
+    box-shadow: var(--sh);
+    letter-spacing: .06em;
+  }
+
+  .pos-bar-btn {
+    height: 42px;
+    padding: 0 20px;
+    border: 1px solid var(--gold);
+    border-radius: 999px;
+    background: var(--gl);
+    color: var(--ink);
+    font: inherit;
+    letter-spacing: .08em;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+
+  .vb {
+    min-height: 40px;
+    padding: 4px 16px;
+  }
+
+  .qty button {
+    width: 38px;
+    height: 38px;
+  }
+
+  /* Notifikasi naik sedikit supaya tidak menimpa bar bawah */
+  body[data-page="kasir"] .toast {
+    bottom: 92px;
+  }
 }
 
 
