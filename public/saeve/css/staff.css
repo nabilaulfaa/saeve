@@ -55,15 +55,19 @@ form.nav {
 }
 
 
-/* ===== Admin: header & bar tab (sesuai Figma) ===== */
-body[data-page="admin"] .top {
+/* ===== Header staf (admin & kasir, sesuai Figma) ===== */
+body[data-page="admin"] .top,
+body[data-page="kasir"] .top,
+body[data-page="login"] .top {
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   height: 70px;
   padding: 0 32px;
 }
 
-body[data-page="admin"] .top .nav {
+body[data-page="admin"] .top .nav,
+body[data-page="kasir"] .top .nav,
+body[data-page="login"] .top .nav {
   justify-self: start;
   color: var(--gl);
   font-size: 1.5rem;
@@ -71,17 +75,23 @@ body[data-page="admin"] .top .nav {
   text-transform: uppercase;
 }
 
-body[data-page="admin"] .top form.nav {
+body[data-page="admin"] .top form.nav,
+body[data-page="kasir"] .top form.nav,
+body[data-page="login"] .top form.nav {
   justify-self: end;
 }
 
-body[data-page="admin"] .top .logo {
+body[data-page="admin"] .top .logo,
+body[data-page="kasir"] .top .logo,
+body[data-page="login"] .top .logo {
   padding-left: .45em; /* mengimbangi spasi huruf di ujung supaya logo benar-benar di tengah */
   font-size: 2.1rem;
   letter-spacing: .45em;
 }
 
-body[data-page="admin"] .top button {
+body[data-page="admin"] .top button,
+body[data-page="kasir"] .top button,
+body[data-page="login"] .top button {
   margin-right: -.3em;
   font-size: 1.05rem;
   font-weight: 400;
@@ -90,9 +100,10 @@ body[data-page="admin"] .top button {
 
 .adm-tabs {
   display: flex;
-  gap: 42px;
-  padding: 0 42px;
+  gap: 36px;
+  padding: 0 40px;
   background: var(--ink);
+  border-top: 1px solid rgba(197, 143, 47, .55); /* garis emas tipis di bawah header */
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -103,15 +114,15 @@ body[data-page="admin"] .top button {
 
 .adm-tab {
   flex: none;
-  height: 66px;
-  padding: 0 8px;
+  height: 46px;
+  padding: 0 10px;
   border: 0;
-  border-bottom: 5px solid transparent;
+  border-bottom: 4px solid transparent;
   background: none;
   color: var(--gl);
-  font-size: 1.5rem;
-  font-weight: 400;
-  letter-spacing: .02em;
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: .2em;
   text-transform: uppercase;
   cursor: pointer;
 }
@@ -1002,40 +1013,49 @@ th {
 }
 
 @media (max-width: 700px) {
-  body[data-page="admin"] .top {
+  body[data-page="admin"] .top,
+  body[data-page="kasir"] .top,
+  body[data-page="login"] .top {
     height: 56px;
     padding: 0 16px;
   }
 
-  body[data-page="admin"] .top .nav {
+  body[data-page="admin"] .top .nav,
+  body[data-page="kasir"] .top .nav,
+  body[data-page="login"] .top .nav {
     font-size: .95rem;
     letter-spacing: .2em;
   }
 
-  body[data-page="admin"] .top .logo {
+  body[data-page="admin"] .top .logo,
+  body[data-page="kasir"] .top .logo,
+  body[data-page="login"] .top .logo {
     padding-left: .3em;
     font-size: 1.3rem;
     letter-spacing: .3em;
   }
 
-  body[data-page="admin"] .top button {
+  body[data-page="admin"] .top button,
+  body[data-page="kasir"] .top button,
+  body[data-page="login"] .top button {
     font-size: .8rem;
     letter-spacing: .2em;
   }
 
   .adm-tabs {
-    gap: 8px;
+    gap: 4px;
     padding: 0 12px;
   }
 
   .adm-tab {
-    height: 54px;
-    padding: 0 12px;
-    font-size: .9rem;
-    letter-spacing: .18em;
+    height: 42px;
+    padding: 0 10px;
+    font-size: .75rem;
+    letter-spacing: .14em;
   }
 
-  body[data-page="admin"] main {
+  body[data-page="admin"] main,
+  body[data-page="kasir"] main {
     padding: 28px 16px 48px;
   }
 }
@@ -1140,5 +1160,800 @@ th {
     top: 0;
     width: 80mm;
     box-shadow: none;
+  }
+}
+
+/* =====================================================================
+   Admin: skala tipografi seragam (Pesanan, Produk & Stok, Laporan)
+   Semua ukuran font & jarak huruf di konten admin diatur lewat variabel
+   di bawah, jadi tiap tab punya hierarki yang sama. Ubah di sini saja.
+   ===================================================================== */
+body[data-page="admin"] {
+  --t-page: 2.2rem;   /* judul halaman / kode pesanan */
+  --t-lg: 1.3rem;     /* judul bagian, nama produk, harga, angka statistik */
+  --t-md: 1.1rem;     /* teks utama */
+  --t-sm: .95rem;     /* keterangan / teks sekunder */
+  --t-xs: .75rem;     /* label tabel, lencana */
+  --ls-text: .08em;   /* jarak huruf teks biasa */
+  --ls-caps: .18em;   /* jarak huruf label kapital & tombol */
+  --ls-head: .12em;   /* jarak huruf judul */
+}
+
+@media (max-width: 700px) {
+  body[data-page="admin"] {
+    --t-page: 1.7rem;
+    --t-lg: 1.15rem;
+    --t-md: 1rem;
+    --t-sm: .85rem;
+    --t-xs: .72rem;
+    --ls-text: .05em;
+    --ls-caps: .14em;
+    --ls-head: .08em;
+  }
+}
+
+/* Judul halaman */
+body[data-page="admin"] .pg-title,
+body[data-page="admin"] h1.l,
+body[data-page="admin"] .od h2.od-code {
+  font-size: var(--t-page);
+  font-weight: 500;
+  line-height: 1.15;
+  letter-spacing: var(--ls-head);
+}
+
+body[data-page="admin"] h1.l {
+  margin: 0 0 20px;
+  color: var(--gold);
+}
+
+/* Judul bagian & elemen penting */
+body[data-page="admin"] h2.l,
+body[data-page="admin"] .pc-name,
+body[data-page="admin"] .pc-price,
+body[data-page="admin"] .od-k,
+body[data-page="admin"] .stat b {
+  font-size: var(--t-lg);
+  letter-spacing: var(--ls-text);
+}
+
+body[data-page="admin"] h2.l {
+  margin: 22px 0 10px;
+  font-weight: 500;
+  color: var(--gold);
+}
+
+body[data-page="admin"] .stat b {
+  margin-top: 4px;
+}
+
+/* Teks utama */
+body[data-page="admin"] .orow-code,
+body[data-page="admin"] .orow-total,
+body[data-page="admin"] .od-v,
+body[data-page="admin"] .od-line,
+body[data-page="admin"] .od-paytxt,
+body[data-page="admin"] .pc-cat,
+body[data-page="admin"] .pc-link,
+body[data-page="admin"] .pc-var,
+body[data-page="admin"] .pc-stok input,
+body[data-page="admin"] .dz-t,
+body[data-page="admin"] .stat,
+body[data-page="admin"] td,
+body[data-page="admin"] .fl,
+body[data-page="admin"] .od-in {
+  font-size: var(--t-md);
+  letter-spacing: var(--ls-text);
+}
+
+/* Teks sekunder */
+body[data-page="admin"] .orow-name,
+body[data-page="admin"] .orow-st,
+body[data-page="admin"] .od-m,
+body[data-page="admin"] .od-var,
+body[data-page="admin"] .od-hint,
+body[data-page="admin"] .dz-s,
+body[data-page="admin"] .vi {
+  font-size: var(--t-sm);
+  letter-spacing: var(--ls-text);
+}
+
+/* Label kapital, tombol, tautan */
+body[data-page="admin"] .od-ch,
+body[data-page="admin"] .od-lbl,
+body[data-page="admin"] .od-link,
+body[data-page="admin"] .od-btn,
+body[data-page="admin"] .btn-dark {
+  font-size: var(--t-sm);
+  letter-spacing: var(--ls-caps);
+}
+
+body[data-page="admin"] .od-lbl {
+  font-size: var(--t-md);
+}
+
+body[data-page="admin"] .btn-dark {
+  height: 52px;
+  padding: 0 32px;
+  border-radius: 16px;
+}
+
+/* Label tabel & lencana */
+body[data-page="admin"] th,
+body[data-page="admin"] .bd {
+  font-size: var(--t-xs);
+  letter-spacing: var(--ls-caps);
+}
+
+body[data-page="admin"] .bd {
+  letter-spacing: .05em;
+}
+
+/* Input form di tab Produk & Laporan ikut ukuran teks utama */
+body[data-page="admin"] .fl input,
+body[data-page="admin"] .fl select {
+  font-size: var(--t-md);
+}
+
+
+/* =====================================================================
+   Admin: form Tambah / Edit Produk
+   ===================================================================== */
+.pf {
+  padding: 34px 40px 40px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+}
+
+.pf-title {
+  margin: 0 0 24px;
+  font-size: var(--t-page, 2.2rem);
+  font-weight: 500;
+  line-height: 1.15;
+  letter-spacing: .02em;
+  color: var(--gold);
+}
+
+.pf-f {
+  display: block;
+  margin-bottom: 22px;
+}
+
+.pf-lbl {
+  display: block;
+  margin-bottom: 8px;
+  font-size: var(--t-sm, .95rem);
+  letter-spacing: var(--ls-caps, .18em);
+  text-transform: uppercase;
+  color: var(--mut);
+}
+
+.pf-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px 28px;
+}
+
+.pf-in {
+  display: block;
+  width: 100%;
+  height: 46px;
+  padding: 0 16px;
+  border: 1px solid var(--copper, #B07A5A);
+  border-radius: 14px;
+  background: #FFF5E8;
+  font: inherit;
+  font-size: var(--t-md, 1.1rem);
+  color: var(--body);
+}
+
+textarea.pf-in {
+  height: auto;
+  min-height: 140px;
+  padding: 12px 16px;
+  line-height: 1.4;
+  resize: vertical;
+}
+
+.pf-in::placeholder {
+  text-transform: uppercase;
+  letter-spacing: var(--ls-caps, .18em);
+  color: var(--mut);
+  opacity: .85;
+}
+
+.pf-in:focus {
+  outline: none;
+  border-color: var(--gold);
+  box-shadow: 0 0 0 3px rgba(197, 143, 47, .18);
+}
+
+.pf-sel {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 48px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23111' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 9l7 7 7-7'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 16px center;
+  background-size: 20px;
+  cursor: pointer;
+}
+
+.pf-note,
+.pf-hint {
+  display: block;
+  margin: 6px 0 0;
+  font-size: var(--t-sm, .95rem);
+  font-style: italic;
+  color: var(--mut);
+}
+
+.pf-hint {
+  margin-top: 10px;
+}
+
+.pf-vrow {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) 32px;
+  gap: 14px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.pf-x {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: none;
+  font-size: 1.2rem;
+  line-height: 1;
+  color: var(--mut);
+  cursor: pointer;
+}
+
+.pf-x:hover {
+  color: var(--maroon);
+  border-color: var(--maroon);
+}
+
+.pf-add {
+  margin-top: 6px;
+  font-size: var(--t-md, 1.1rem);
+}
+
+.pf-acts {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+  margin-top: 28px;
+}
+
+.pf-acts .pc-link {
+  font-size: var(--t-md, 1.1rem);
+}
+
+/* Tombol "Edit" di kartu produk ikut ukuran teks utama */
+body[data-page="admin"] .pc-link {
+  font-size: var(--t-md);
+  letter-spacing: var(--ls-text);
+}
+
+body[data-page="admin"] .pc-link:hover {
+  border-bottom-color: var(--gl);
+}
+
+@media (max-width: 700px) {
+  .pf {
+    padding: 22px 16px 28px;
+  }
+
+  .pf-row {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+
+  .pf-vrow {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 84px 30px;
+    gap: 8px;
+  }
+
+  .pf-in {
+    padding: 0 12px;
+  }
+
+  .pf-acts {
+    gap: 24px;
+  }
+}
+
+
+/* Tombol Edit & Hapus di kartu produk */
+.pc-acts {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+}
+
+body[data-page="admin"] .pc-link.del {
+  color: var(--maroon);
+}
+
+body[data-page="admin"] .pc-link.del:hover {
+  border-bottom-color: var(--maroon);
+}
+
+
+/* =====================================================================
+   Admin: laporan (tampilan baru)
+   ===================================================================== */
+.rp-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px 20px;
+  margin-bottom: 28px;
+}
+
+.rp-fl {
+  display: block;
+  min-width: 190px;
+}
+
+.rp-in {
+  display: block;
+  width: 100%;
+  height: 48px;
+  padding: 0 16px;
+  border: 1px solid var(--copper, #B6805B);
+  border-radius: 14px;
+  background-color: var(--paper);
+  font: inherit;
+  font-size: var(--t-md, 1.1rem);
+  color: var(--body);
+}
+
+.rp-in:focus {
+  outline: none;
+  border-color: var(--gold);
+  box-shadow: 0 0 0 3px rgba(197, 143, 47, .18);
+}
+
+.rp-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 16px;
+  margin-bottom: 8px;
+}
+
+.rp-stats .stat {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--beige);
+}
+
+.rp-stats .stat-l {
+  font-size: var(--t-sm, .95rem);
+  letter-spacing: var(--ls-caps, .18em);
+  text-transform: uppercase;
+  color: var(--mut);
+}
+
+.rp-stats .stat b {
+  margin: 0;
+  font-size: 1.5rem;
+  letter-spacing: var(--ls-text, .08em);
+  text-transform: uppercase;
+  color: var(--gold);
+}
+
+.rp-stats .stat small {
+  font-size: var(--t-sm, .95rem);
+  letter-spacing: var(--ls-text, .08em);
+  color: var(--mut);
+}
+
+body[data-page="admin"] .tw {
+  border-radius: 0;
+}
+
+body[data-page="admin"] .rp-tbl {
+  min-width: 720px;
+}
+
+body[data-page="admin"] .rp-tbl th {
+  padding: 16px 14px;
+  border-bottom: 1px solid var(--gold);
+}
+
+body[data-page="admin"] .rp-tbl td {
+  padding: 14px;
+}
+
+@media (max-width: 700px) {
+  .rp-filter {
+    gap: 12px;
+  }
+
+  .rp-fl {
+    flex: 1 1 140px;
+    min-width: 0;
+  }
+
+  .rp-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .rp-stats .stat {
+    padding: 14px;
+  }
+
+  .rp-stats .stat b {
+    font-size: 1.15rem;
+  }
+}
+
+
+/* Tombol "Terapkan" di filter laporan */
+.rp-filter {
+  align-items: flex-end;
+}
+
+body[data-page="admin"] .rp-apply {
+  height: 48px;
+  padding: 0 32px;
+  border-radius: 14px;
+}
+
+@media (max-width: 700px) {
+  body[data-page="admin"] .rp-apply {
+    flex: 1 1 100%;
+  }
+}
+
+
+/* =====================================================================
+   Admin: promo & voucher
+   ===================================================================== */
+.pm {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(320px, 1fr);
+  gap: 40px;
+  align-items: start;
+}
+
+.pm-list {
+  margin-bottom: 0;
+}
+
+body[data-page="admin"] .pm-tbl {
+  min-width: 620px;
+}
+
+body[data-page="admin"] .pm-tbl th {
+  padding: 16px 14px;
+  border-bottom: 1px solid var(--gold);
+}
+
+body[data-page="admin"] .pm-tbl td {
+  padding: 16px 14px;
+  vertical-align: top;
+  font-size: var(--t-md);
+  letter-spacing: var(--ls-text);
+}
+
+.pm-tbl tr.on td {
+  background: var(--soft);
+}
+
+.pm-tbl small {
+  display: block;
+  margin-top: 4px;
+  font-size: var(--t-sm, .95rem);
+  color: var(--mut);
+}
+
+.pm-code {
+  font-weight: 600;
+  color: var(--gold);
+}
+
+.pm-st.aktif {
+  color: var(--gold);
+}
+
+.pm-st.nonaktif,
+.pm-st.kedaluwarsa,
+.pm-st.habis {
+  color: var(--mut);
+}
+
+.pm-st.belum_mulai {
+  color: var(--body);
+}
+
+.pm-acts {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.pm-link {
+  display: block;
+  margin: 0 0 6px auto;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid currentColor;
+  background: none;
+  font: inherit;
+  font-size: var(--t-sm, .95rem);
+  color: var(--gold);
+  cursor: pointer;
+}
+
+.pm-link.del {
+  color: var(--maroon);
+}
+
+/* Bingkai krem dengan sudut emas di sekeliling form */
+.pm-frame {
+  position: relative;
+  padding: 18px;
+  background: var(--beige);
+}
+
+.pm-frame .c {
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  border: 0 solid var(--gl);
+}
+
+.pm-frame .tl { top: 0; left: 0; border-top-width: 2px; border-left-width: 2px; }
+.pm-frame .tr { top: 0; right: 0; border-top-width: 2px; border-right-width: 2px; }
+.pm-frame .bl { bottom: 0; left: 0; border-bottom-width: 2px; border-left-width: 2px; }
+.pm-frame .br { bottom: 0; right: 0; border-bottom-width: 2px; border-right-width: 2px; }
+
+.pm-form {
+  padding: 24px;
+  background: var(--paper);
+}
+
+.pm-title {
+  margin: 0 0 18px;
+  font-size: var(--t-lg, 1.3rem);
+  font-weight: 500;
+  letter-spacing: var(--ls-text, .08em);
+  color: var(--gold);
+}
+
+.pm-f {
+  display: block;
+  margin-bottom: 16px;
+}
+
+.pm-f .pf-lbl {
+  font-size: var(--t-xs, .75rem);
+  margin-bottom: 6px;
+}
+
+.pm-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 14px;
+}
+
+.pm-in {
+  display: block;
+  width: 100%;
+  height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background-color: var(--ivory);
+  font: inherit;
+  font-size: var(--t-md, 1.1rem);
+  letter-spacing: var(--ls-text, .08em);
+  color: var(--body);
+}
+
+.pm-in:focus {
+  outline: none;
+  border-color: var(--gold);
+  box-shadow: 0 0 0 3px rgba(197, 143, 47, .18);
+}
+
+.pm-up {
+  text-transform: uppercase;
+}
+
+select.pm-in {
+  padding-right: 40px;
+  background-position: right 12px center;
+  background-size: 18px;
+}
+
+.pm-chk {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 0 20px;
+  font-size: var(--t-md, 1.1rem);
+  cursor: pointer;
+}
+
+.pm-chk input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--gold);
+}
+
+.pm-btns {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+}
+
+@media (max-width: 1000px) {
+  .pm {
+    grid-template-columns: 1fr;
+    gap: 28px;
+  }
+}
+
+@media (max-width: 700px) {
+  .pm-form {
+    padding: 18px 14px;
+  }
+
+  .pm-frame {
+    padding: 12px;
+  }
+
+  .pm-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+
+/* Voucher di kasir */
+.pos-vc {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.pos-vc input {
+  flex: 1;
+  min-width: 0;
+  text-transform: uppercase;
+}
+
+.pos-vc .btn {
+  flex: none;
+  padding: 0 18px;
+}
+
+.pos-vc.on {
+  align-items: center;
+  justify-content: space-between;
+  margin: 12px 0;
+  padding: 10px 12px;
+  border: 1px dashed var(--gold);
+}
+
+
+/* =====================================================================
+   Halaman masuk staf: isi halaman disamakan dengan admin & kasir
+   (judul, label, kolom isian, dan tombol memakai gaya yang sama)
+   ===================================================================== */
+body[data-page="login"] {
+  --t-page: 2.2rem;
+  --t-md: 1.1rem;
+  --t-sm: .95rem;
+  --ls-text: .08em;
+  --ls-caps: .18em;
+  --ls-head: .12em;
+}
+
+body[data-page="login"] main.narrow {
+  max-width: 500px;
+  padding: 56px 16px 64px;
+}
+
+body[data-page="login"] .hd {
+  margin-bottom: 28px;
+}
+
+body[data-page="login"] .hd .eb {
+  font-size: var(--t-sm);
+  letter-spacing: .35em;
+}
+
+body[data-page="login"] .hd h1 {
+  margin-top: 6px;
+  font-size: var(--t-page);
+  font-weight: 500;
+  line-height: 1.15;
+  letter-spacing: var(--ls-head);
+}
+
+body[data-page="login"] .box {
+  padding: 32px 36px 36px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+}
+
+body[data-page="login"] .fl {
+  gap: 0;
+  margin-bottom: 22px;
+  font-size: var(--t-sm);
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+  color: var(--mut);
+}
+
+body[data-page="login"] .fl input {
+  height: 46px;
+  margin-top: 8px;
+  padding: 0 16px;
+  border: 1px solid var(--copper, #B6805B);
+  border-radius: 14px;
+  background-color: #FFF5E8;
+  font: inherit;
+  font-size: var(--t-md);
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--body);
+}
+
+body[data-page="login"] .fl input:focus {
+  outline: none;
+  border-color: var(--gold);
+  box-shadow: 0 0 0 3px rgba(197, 143, 47, .18);
+}
+
+/* Isi otomatis browser tidak lagi berwarna biru */
+body[data-page="login"] .fl input:-webkit-autofill,
+body[data-page="login"] .fl input:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0 1000px #FFF5E8 inset;
+  -webkit-text-fill-color: var(--body);
+  caret-color: var(--body);
+}
+
+body[data-page="login"] .err {
+  margin: -6px 0 16px;
+  font-size: var(--t-sm);
+  letter-spacing: var(--ls-text);
+}
+
+body[data-page="login"] .box .btn.pri {
+  height: 52px;
+  margin: 6px 0 0;
+  padding: 0 36px;
+  border-radius: 16px;
+  font-size: var(--t-md);
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+}
+
+@media (max-width: 700px) {
+  body[data-page="login"] {
+    --t-page: 1.7rem;
+    --t-md: 1rem;
+    --t-sm: .85rem;
+    --ls-caps: .14em;
+    --ls-head: .08em;
+  }
+
+  body[data-page="login"] main.narrow {
+    padding: 36px 14px 48px;
+  }
+
+  body[data-page="login"] .box {
+    padding: 22px 18px 26px;
   }
 }

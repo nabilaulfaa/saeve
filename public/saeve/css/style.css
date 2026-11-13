@@ -43,6 +43,13 @@ select {
   color: inherit;
 }
 
+/* Ruang scrollbar selalu disediakan, jadi lebar halaman sama di semua halaman
+ * (login, admin, kasir, pelanggan). Tanpa ini logo SAEVÉ bergeser ke kiri/kanan
+ * beberapa piksel tergantung halamannya cukup panjang untuk muncul scrollbar atau tidak. */
+html {
+  scrollbar-gutter: stable;
+}
+
 main {
   max-width: 1080px;
   margin: 0 auto;
@@ -74,11 +81,11 @@ h2 {
   top: 0;
   z-index: 5;
   background: var(--ink);
-  height: 56px;
+  height: 70px;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0 24px;
+  padding: 0 32px;
 }
 
 .logo {
@@ -89,21 +96,22 @@ h2 {
 }
 
 .top .logo {
-  font-size: 1.5rem;
+  padding-left: .45em; /* mengimbangi spasi huruf di ujung supaya logo benar-benar di tengah */
+  font-size: 2.1rem;
   letter-spacing: .45em;
 }
 
 .menu {
   position: absolute;
-  right: 24px;
+  right: 32px;
   display: flex;
   gap: 26px;
 }
 
 .menu a {
   color: var(--gl);
-  font-size: .8rem;
-  letter-spacing: .18em;
+  font-size: .9rem;
+  letter-spacing: .2em;
   text-transform: uppercase;
   white-space: nowrap;
 }
@@ -1543,25 +1551,52 @@ body.lock {
   }
 }
 
-@media (max-width: 700px) {
+/* Layar sedang: logo pindah ke kiri supaya tidak tabrakan dengan menu */
+@media (max-width: 1100px) {
   .top {
     justify-content: space-between;
-    padding: 0 14px;
   }
 
   .top .logo {
-    font-size: 1rem;
-    letter-spacing: .2em;
+    padding-left: 0;
   }
 
   .menu {
     position: static;
-    gap: 10px;
+    gap: 20px;
+  }
+}
+
+@media (max-width: 700px) {
+  .top {
+    height: 56px;
+    padding: 0 16px;
+  }
+
+  .top .logo {
+    font-size: 1.3rem;
+    letter-spacing: .3em;
+  }
+
+  .menu {
+    gap: 8px;
   }
 
   .menu a {
     font-size: .6rem;
     letter-spacing: .05em;
+  }
+}
+
+/* HP kecil: logo dikecilkan sedikit supaya menu muat satu baris */
+@media (max-width: 400px) {
+  .top {
+    padding: 0 12px;
+  }
+
+  .top .logo {
+    font-size: 1.1rem;
+    letter-spacing: .2em;
   }
 }
 
@@ -1583,5 +1618,225 @@ body.lock {
 
   .rc {
     box-shadow: none;
+  }
+}
+
+/* ===== Voucher di checkout ===== */
+.ck-vc {
+  margin: 16px 0 6px;
+}
+
+.ck-vbtn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  height: 46px;
+  padding: 0 14px;
+  border: 1px dashed var(--gold);
+  border-radius: 8px;
+  background: var(--ivory);
+  font: inherit;
+  letter-spacing: .06em;
+  color: var(--gold);
+  cursor: pointer;
+}
+
+.ck-vbtn.on {
+  border-style: solid;
+  font-weight: 600;
+}
+
+.ck-vmsg {
+  min-height: 1.3em;
+  margin: 8px 0 0;
+  font-size: .9rem;
+  color: var(--mut);
+}
+
+.ck-vrm {
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid currentColor;
+  background: none;
+  font: inherit;
+  color: var(--maroon);
+  cursor: pointer;
+}
+
+/* Lembar pilih voucher */
+.vm-back {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(17, 17, 17, .5);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .2s;
+}
+
+.vm-back.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.vm {
+  display: flex;
+  flex-direction: column;
+  width: min(520px, 100%);
+  max-height: 82vh;
+  border-radius: 18px 18px 0 0;
+  background: var(--ivory);
+  transform: translateY(24px);
+  transition: transform .2s;
+}
+
+.vm-back.open .vm {
+  transform: none;
+}
+
+.vm-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+.vm-head h2 {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 500;
+  color: var(--gold);
+}
+
+.vm-x {
+  width: 32px;
+  height: 32px;
+  border: 0;
+  background: none;
+  color: var(--body);
+  cursor: pointer;
+}
+
+.vm-x svg {
+  width: 20px;
+  height: 20px;
+}
+
+.vm-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 20px 24px;
+  overflow-y: auto;
+}
+
+.vc-card {
+  display: flex;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper);
+}
+
+.vc-val {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 96px;
+  padding: 12px 8px;
+  background: var(--ink);
+  color: var(--gl);
+  text-align: center;
+}
+
+.vc-val b {
+  font-size: 1.3rem;
+  font-weight: 500;
+  letter-spacing: .04em;
+}
+
+.vc-val small {
+  font-size: .7rem;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+
+.vc-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  padding: 12px 14px;
+}
+
+.vc-code {
+  font-weight: 600;
+  letter-spacing: .12em;
+  color: var(--gold);
+}
+
+.vc-tc {
+  font-size: .82rem;
+  color: var(--mut);
+}
+
+.vc-save {
+  margin-top: 4px;
+  font-size: .82rem;
+  color: var(--gold);
+}
+
+.vc-note {
+  margin-top: 4px;
+  font-size: .82rem;
+  color: var(--maroon);
+}
+
+.vc-act {
+  display: flex;
+  flex: none;
+  align-items: center;
+  padding: 0 14px;
+}
+
+.vc-act .btn {
+  height: 36px;
+  padding: 0 16px;
+}
+
+.vc-picked {
+  font-size: .85rem;
+  letter-spacing: .08em;
+  color: var(--gold);
+}
+
+.vc-card.off {
+  opacity: .6;
+}
+
+.vc-card.off .vc-val {
+  background: var(--mut);
+}
+
+.vc-card.on {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 1px var(--gold);
+}
+
+@media (min-width: 700px) {
+  .vm-back {
+    align-items: center;
+  }
+
+  .vm {
+    border-radius: 18px;
   }
 }

@@ -7,7 +7,7 @@
     <link rel="stylesheet" href="{{ asset('saeve/css/style.css') }}">
     <link rel="stylesheet" href="{{ asset('saeve/css/staff.css') }}">
 </head>
-<body>
+<body data-page="login">
     <header class="top">
         <a href="/" class="nav">Toko</a>
         <span class="logo">SAEVÉ</span>

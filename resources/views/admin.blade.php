@@ -18,6 +18,8 @@
         </form>
     </header>
 
+    <nav class="adm-tabs" id="tabs"></nav>
+
     <main id="app"></main>
     <div id="toast" class="toast"></div>
 

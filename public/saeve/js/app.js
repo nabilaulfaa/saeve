@@ -54,6 +54,9 @@ function saveCart() {
   }
 }
 
+/* Voucher yang sudah dicek di halaman checkout: { code, type, value, subtotal, discount } atau null */
+let appliedVoucher = null;
+
 function cartTotal() {
   return cart.reduce((sum, item) => {
     const found = API.findVariant(item.variantId);
@@ -234,6 +237,122 @@ function closeCart() {
 }
 
 
+/* ===== Pilih voucher (lembar dari bawah, seperti marketplace) ===== */
+
+function closeVoucherSheet() {
+  document.body.classList.remove('lock');
+  const sheet = $('#vmSheet');
+  if (sheet) sheet.classList.remove('open');
+}
+
+function ensureVoucherSheet() {
+  let sheet = $('#vmSheet');
+  if (sheet) return sheet;
+
+  sheet = document.createElement('div');
+  sheet.id = 'vmSheet';
+  sheet.className = 'vm-back';
+  sheet.innerHTML = `
+    <div class="vm" role="dialog" aria-label="Pilih voucher">
+      <header class="vm-head">
+        <h2>Voucher</h2>
+        <button type="button" class="vm-x" aria-label="Tutup">${CLOSE_ICON}</button>
+      </header>
+      <div class="vm-list" id="vmList"></div>
+    </div>`;
+  document.body.appendChild(sheet);
+
+  sheet.addEventListener('click', (event) => {
+    if (event.target.id === 'vmSheet' || event.target.closest('.vm-x')) closeVoucherSheet();
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') closeVoucherSheet();
+  });
+  return sheet;
+}
+
+/* Nilai singkat untuk sisi kiri kartu: "20%" atau "Rp 25rb" */
+function voucherShort(voucher) {
+  if (voucher.type === 'persen') return voucher.value + '%';
+  if (voucher.value >= 1000 && voucher.value % 1000 === 0) return 'Rp ' + voucher.value / 1000 + 'rb';
+  return formatRupiah(voucher.value);
+}
+
+function voucherCard(voucher, selectedCode) {
+  const isSelected = voucher.code === selectedCode;
+  const until = voucher.endsAt
+    ? new Date(voucher.endsAt + 'T00:00:00').toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })
+    : '';
+
+  const terms = [
+    voucher.type === 'persen' ? `Diskon ${voucher.value}%` : `Potongan ${formatRupiah(voucher.value)}`,
+    voucher.minSpend ? `Min. belanja ${formatRupiah(voucher.minSpend)}` : 'Tanpa minimum belanja',
+    until ? `Berlaku s/d ${until}` : '',
+    voucher.remaining !== null ? `Kuota tersisa ${voucher.remaining}` : '',
+  ].filter(Boolean).map((line) => `<div class="vc-tc">${line}</div>`).join('');
+
+  const note = !voucher.eligible
+    ? `<div class="vc-note">${escapeHtml(voucher.reason)}</div>`
+    : `<div class="vc-save">Hemat ${formatRupiah(voucher.discount)} untuk pesananmu</div>`;
+
+  const action = !voucher.eligible
+    ? ''
+    : isSelected
+      ? '<span class="vc-picked">Dipakai</span>'
+      : `<button type="button" class="btn pri" data-vc="${escapeHtml(voucher.code)}">Pakai</button>`;
+
+  return `
+    <div class="vc-card ${voucher.eligible ? '' : 'off'} ${isSelected ? 'on' : ''}">
+      <div class="vc-val"><b>${voucherShort(voucher)}</b><small>${voucher.type === 'persen' ? 'Diskon' : 'Potongan'}</small></div>
+      <div class="vc-body">
+        <div class="vc-code">${escapeHtml(voucher.code)}</div>
+        ${terms}
+        ${note}
+      </div>
+      <div class="vc-act">${action}</div>
+    </div>`;
+}
+
+async function openVoucherSheet(onPick, selectedCode) {
+  const sheet = ensureVoucherSheet();
+  const list = $('#vmList');
+
+  list.innerHTML = '<p class="sub center">Memuat voucher…</p>';
+  list.onclick = null;
+  document.body.classList.add('lock');
+  requestAnimationFrame(() => sheet.classList.add('open'));
+
+  let vouchers;
+  try {
+    vouchers = await apiRequest('/vouchers/available', {
+      method: 'POST',
+      body: JSON.stringify({ lines: cart.map((item) => ({ variantId: item.variantId, qty: item.qty })) }),
+    });
+  } catch (error) {
+    list.innerHTML = `<p class="sub center">${escapeHtml(error.message)}</p>`;
+    return;
+  }
+
+  list.innerHTML = vouchers.length
+    ? vouchers.map((voucher) => voucherCard(voucher, selectedCode)).join('')
+    : '<p class="sub center">Belum ada voucher yang tersedia saat ini.</p>';
+
+  list.onclick = async (event) => {
+    const button = event.target.closest('[data-vc]');
+    if (!button) return;
+
+    button.disabled = true;
+    try {
+      await onPick(button.dataset.vc);
+      closeVoucherSheet();
+    } catch (error) {
+      showToast(error.message);
+      button.disabled = false;
+    }
+  };
+}
+
+
 /* ===== Halaman (view) =====
  * Setiap view mengembalikan string HTML. Event dipasang terpisah di bind().
  */
@@ -379,6 +498,7 @@ const views = {
   /* ---- Checkout ---- */
   checkout() {
     if (!cart.length) return views.keranjang();
+    appliedVoucher = null;
 
     const summaryRows = cart.map((item) => {
       const { product, variant } = API.findVariant(item.variantId);
@@ -422,6 +542,11 @@ const views = {
           ${summaryRows}
           <div class="ck-line"></div>
           <div class="ck-sub"><span>Subtotal</span><span>${formatRupiahDot(cartTotal())}</span></div>
+          <div id="ckdisc"></div>
+          <div class="ck-vc">
+            <button type="button" class="ck-vbtn" id="vcopen"><span id="vclabel">Pilih voucher</span><span aria-hidden="true">›</span></button>
+            <div class="ck-vmsg" id="vcmsg"></div>
+          </div>
           <p class="ck-pay">Pembayaran manual lewat transfer. Rekening tampil setelah pesanan dibuat.</p>
         </aside>
       </div>`;
@@ -495,6 +620,7 @@ const views = {
         ${itemRows}
         <hr>
         <div class="sum"><span>Subtotal</span><span>${formatRupiah(order.subtotal)}</span></div>
+        ${order.discount ? `<div class="sum"><span>Diskon${order.voucherCode ? ' (' + escapeHtml(order.voucherCode) + ')' : ''}</span><span>−${formatRupiah(order.discount)}</span></div>` : ''}
         <div class="sum"><span>Ongkir</span><span>${shippingPending ? 'Ditetapkan admin' : formatRupiah(order.shippingFee)}</span></div>
         <div class="sum t"><span>TOTAL</span><span>${shippingPending ? 'Subtotal + ongkir' : formatRupiah(order.total)}</span></div>
         <hr>
@@ -666,9 +792,53 @@ function bindCheckoutForm() {
     addressBox.style.display = form.elements.delivery.value === 'kirim' ? '' : 'none';
   });
 
+  // Voucher: pelanggan memilih dari daftar voucher yang tersedia (tanpa mengetik kode)
+  const voucherButton = $('#vcopen');
+  const voucherLabel = $('#vclabel');
+  const voucherMsg = $('#vcmsg');
+  const discountBox = $('#ckdisc');
+
+  const showVoucher = () => {
+    if (!appliedVoucher) {
+      discountBox.innerHTML = '';
+      voucherLabel.textContent = 'Pilih voucher';
+      voucherButton.classList.remove('on');
+      voucherMsg.innerHTML = '';
+      return;
+    }
+
+    discountBox.innerHTML = `
+      <div class="ck-sub"><span>Diskon (${escapeHtml(appliedVoucher.code)})</span><span>−${formatRupiahDot(appliedVoucher.discount)}</span></div>
+      <div class="ck-sub t"><span>Total</span><span>${formatRupiahDot(cartTotal() - appliedVoucher.discount)}</span></div>`;
+    voucherLabel.textContent = `${appliedVoucher.code} · hemat ${formatRupiah(appliedVoucher.discount)}`;
+    voucherButton.classList.add('on');
+    voucherMsg.innerHTML = '<button type="button" class="ck-vrm" id="vcrm">Lepas voucher</button>';
+    $('#vcrm').onclick = () => {
+      appliedVoucher = null;
+      showVoucher();
+    };
+  };
+
+  /* Dipanggil saat pelanggan menekan "Pakai" di daftar voucher; potongan dihitung ulang oleh server. */
+  const useVoucher = async (code) => {
+    const response = await fetch('/api/vouchers/check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ code, lines: cart.map((item) => ({ variantId: item.variantId, qty: item.qty })) }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.message || 'Voucher tidak bisa dipakai.');
+
+    appliedVoucher = body;
+    showVoucher();
+  };
+
+  voucherButton.onclick = () => openVoucherSheet(useVoucher, appliedVoucher ? appliedVoucher.code : null);
+
   form.onsubmit = async (event) => {
     event.preventDefault();
     const data = Object.fromEntries(new FormData(form));
+    data.voucher = appliedVoucher ? appliedVoucher.code : '';
     const errorBox = $('#er');
     const phone = data.phone.replace(/\D/g, '');
 
@@ -687,6 +857,7 @@ function bindCheckoutForm() {
 
     try {
       const order = await API.createOrder(data, cart);
+      appliedVoucher = null;
       cart = [];
       saveCart();
       location.hash = '#/dibuat/' + order.code;

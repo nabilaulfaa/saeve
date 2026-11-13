@@ -18,6 +18,7 @@ Route::prefix('staff')->group(function () {
     Route::middleware(EnsureRole::class . ':admin,kasir')->group(function () {
         Route::get('products', [StaffController::class, 'products']);
         Route::post('pos', [StaffController::class, 'pos']);
+        Route::post('pos/voucher', [StaffController::class, 'posVoucher']);
     });
     Route::middleware(EnsureRole::class . ':admin')->group(function () {
         Route::get('orders', [StaffController::class, 'orders']);
@@ -25,6 +26,13 @@ Route::prefix('staff')->group(function () {
         Route::post('orders/{order}/verify', [StaffController::class, 'verify']);
         Route::post('orders/{order}/status', [StaffController::class, 'status']);
         Route::post('products', [StaffController::class, 'createProduct']);
+        Route::put('products/{product}', [StaffController::class, 'updateProduct']);
+        Route::delete('products/{product}', [StaffController::class, 'deleteProduct']);
+        Route::get('vouchers', [StaffController::class, 'vouchers']);
+        Route::post('vouchers', [StaffController::class, 'createVoucher']);
+        Route::put('vouchers/{voucher}', [StaffController::class, 'updateVoucher']);
+        Route::post('vouchers/{voucher}/toggle', [StaffController::class, 'toggleVoucher']);
+        Route::delete('vouchers/{voucher}', [StaffController::class, 'deleteVoucher']);
         Route::post('variants/{variant}/stock', [StaffController::class, 'stock']);
         Route::get('report', [StaffController::class, 'report']);
         Route::post('products/{product}/photos', [StaffController::class, 'uploadPhotos']);
