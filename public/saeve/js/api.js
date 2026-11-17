@@ -72,7 +72,7 @@ const API = {
       body: JSON.stringify({ ...form, lines }),
     });
     rememberOrder(order);
-    await API.load(true); 
+    await API.load(true);
     return order;
   },
 
@@ -92,5 +92,18 @@ const API = {
 
   getOrder(code) {
     return savedOrders[code];
+  },
+
+  /* Cari lokasi tujuan (RajaOngkir). Hasil: daftar { id, label, city_name, zip_code, ... } */
+  async searchDestination(keyword) {
+    return apiRequest('/shipping/search?q=' + encodeURIComponent(keyword));
+  },
+
+  /* Estimasi ongkir. weight dalam gram. Hasil: daftar layanan { code, service, description, cost, etd } */
+  async shippingCost(destinationId, weight, couriers) {
+    return apiRequest('/shipping/cost', {
+      method: 'POST',
+      body: JSON.stringify({ destination: destinationId, weight, couriers }),
+    });
   },
 };

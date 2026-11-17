@@ -6,6 +6,7 @@ use App\Models\Order;
 use App\Models\Product;
 use App\Models\ProductVariant;
 use App\Models\Voucher;
+use App\Services\RajaOngkirService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -13,6 +14,9 @@ use Illuminate\Validation\ValidationException;
 
 class StoreController extends Controller
 {
+    /* Berat per item (gram) kalau produk belum punya berat. Samakan dengan SHIPPING_DEFAULT_WEIGHT di app.js. */
+    private const DEFAULT_ITEM_WEIGHT = 100;
+
     public function products()
     {
         return Product::with(['variants', 'photos'])->orderBy('id')->get()->map(fn ($p) => [
@@ -28,7 +32,7 @@ class StoreController extends Controller
         ])->values();
     }
 
-    public function store(Request $r)
+    public function store(Request $r, RajaOngkirService $ro)
     {
         $r->merge(['phone' => preg_replace('/\D/', '', (string) $r->input('phone', ''))]);
         $d = $r->validate([
@@ -42,9 +46,17 @@ class StoreController extends Controller
             'lines.*.variantId' => 'required|integer|exists:product_variants,id',
             'lines.*.qty' => 'required|integer|min:1|max:99',
             'voucher' => 'nullable|string|max:30',
+            // Pilihan ongkir (opsional). Harganya TIDAK dipercaya dari browser, dihitung ulang di server.
+            'shipping_destination_id' => 'nullable|integer',
+            'shipping_courier' => 'nullable|string|max:20',
+            'shipping_service' => 'nullable|string|max:30',
         ]);
 
-        $order = DB::transaction(function () use ($d) {
+        // Hitung estimasi ongkir SEBELUM transaksi database, supaya panggilan ke RajaOngkir
+        // tidak menahan kunci stok.
+        $shipping = $this->estimateShipping($d, $ro);
+
+        $order = DB::transaction(function () use ($d, $shipping) {
             $qty = [];
             foreach ($d['lines'] as $l) {
                 $qty[$l['variantId']] = ($qty[$l['variantId']] ?? 0) + $l['qty'];
@@ -77,14 +89,22 @@ class StoreController extends Controller
             }
 
             $kirim = $d['delivery'] === 'kirim';
+
+            // Ongkir otomatis: kalau pembeli memilih layanan kurir dan server berhasil memverifikasinya,
+            // ongkir langsung masuk total dan pesanan langsung menunggu pembayaran.
+            // Kalau tidak ada pilihan (RajaOngkir sedang gangguan), alurnya kembali manual: admin menetapkan ongkir.
+            $autoShip = $kirim && $shipping['shipping_estimate'] !== null;
+            $fee = $autoShip ? $shipping['shipping_estimate'] : 0;
+
             $o = Order::create([
                 'code' => 'TMP' . uniqid(),
-                'status' => $kirim ? 'menunggu_ongkir' : 'menunggu_bayar',
+                'status' => ($kirim && !$autoShip) ? 'menunggu_ongkir' : 'menunggu_bayar',
                 'customer_name' => $d['name'], 'phone' => $d['phone'], 'delivery_method' => $d['delivery'],
                 'address' => $kirim ? $d['address'] : null, 'city' => $kirim ? $d['city'] : null,
-                'postal_code' => $kirim ? $d['postal'] : null, 'subtotal' => $sub, 'total' => $sub - $discount,
+                'postal_code' => $kirim ? $d['postal'] : null, 'subtotal' => $sub,
+                'shipping_fee' => $fee, 'total' => $sub - $discount + $fee,
                 'voucher_code' => $voucherCode, 'discount' => $discount,
-            ]);
+            ] + $shipping);
             $o->update(['code' => 'SV-' . (1000 + $o->id)]);
             $o->items()->createMany($items);
             return $o->fresh('items');
@@ -165,6 +185,67 @@ class StoreController extends Controller
         return $subtotal;
     }
 
+    /* Total berat (gram) isi keranjang, dihitung dari data produk di database. */
+    private function weightFor(array $lines): int
+    {
+        $qty = [];
+        foreach ($lines as $l) {
+            $qty[$l['variantId']] = ($qty[$l['variantId']] ?? 0) + $l['qty'];
+        }
+
+        $weight = 0;
+        foreach (ProductVariant::with('product')->whereIn('id', array_keys($qty))->get() as $v) {
+            $perItem = (int) $v->product->weight ?: self::DEFAULT_ITEM_WEIGHT;
+            $weight += $perItem * $qty[$v->id];
+        }
+
+        return max(1, $weight);
+    }
+
+    /*
+     * Hitung ulang ongkir pilihan pembeli lewat RajaOngkir.
+     * - Pilihan tidak diisi: pesanan dibuat tanpa ongkir otomatis (admin menetapkan manual).
+     * - Pilihan diisi tapi gagal diverifikasi: ditolak dengan pesan, supaya total tidak berbeda dari yang dilihat pembeli.
+     */
+    private function estimateShipping(array $d, RajaOngkirService $ro): array
+    {
+        $none = [
+            'shipping_destination_id' => null, 'shipping_courier' => null,
+            'shipping_service' => null, 'shipping_etd' => null, 'shipping_estimate' => null,
+        ];
+
+        if (
+            $d['delivery'] !== 'kirim'
+            || empty($d['shipping_destination_id'])
+            || empty($d['shipping_courier'])
+            || empty($d['shipping_service'])
+        ) {
+            return $none;
+        }
+
+        try {
+            $courier = strtolower($d['shipping_courier']);
+            $options = $ro->calculateCost((int) $d['shipping_destination_id'], $this->weightFor($d['lines']), [$courier]);
+
+            foreach ($options as $option) {
+                if (strtolower($option['code']) === $courier && $option['service'] === $d['shipping_service']) {
+                    return [
+                        'shipping_destination_id' => (int) $d['shipping_destination_id'],
+                        'shipping_courier' => $courier,
+                        'shipping_service' => $option['service'],
+                        'shipping_etd' => $option['etd'] ?? null,
+                        'shipping_estimate' => (int) $option['cost'],
+                    ];
+                }
+            }
+        } catch (\Throwable $e) {
+            report($e);
+            throw ValidationException::withMessages(['shipping' => 'Ongkir gagal dihitung. Coba lagi sebentar lagi.']);
+        }
+
+        throw ValidationException::withMessages(['shipping' => 'Layanan pengiriman yang dipilih tidak tersedia. Silakan pilih ulang.']);
+    }
+
     public function lookup(Request $r)
     {
         $r->validate(['code' => 'required|string', 'phone' => 'required|string']);
@@ -182,6 +263,9 @@ class StoreController extends Controller
             'delivery' => $o->delivery_method, 'address' => $o->address, 'city' => $o->city,
             'subtotal' => $o->subtotal, 'shippingFee' => $o->shipping_fee, 'total' => $o->total,
             'voucherCode' => $o->voucher_code, 'discount' => (int) $o->discount,
+            'shippingCourier' => $o->shipping_courier, 'shippingService' => $o->shipping_service,
+            'shippingEtd' => $o->shipping_etd,
+            'shippingEstimate' => $o->shipping_estimate === null ? null : (int) $o->shipping_estimate,
             'createdAt' => $o->created_at->toIso8601String(),
             'items' => $o->items->map(fn ($i) => [
                 'productName' => $i->product_name, 'color' => $i->color, 'size' => $i->size,

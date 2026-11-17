@@ -104,7 +104,7 @@ function renderReceipt(order) {
     </div>`).join('');
 
   const shippingRow = isDelivery
-    ? `<div class="sum"><span>Ongkir</span><span>${formatRupiah(order.shippingFee)}</span></div>`
+    ? `<div class="sum"><span>Ongkir${order.shippingService ? ' <small>(' + escapeHtml(String(order.shippingCourier).toUpperCase()) + ' ' + escapeHtml(order.shippingService) + ')</small>' : ''}</span><span>${formatRupiah(order.shippingFee)}</span></div>`
     : '';
 
   const paymentRows = isPos && order.payment === 'tunai'
@@ -150,6 +150,7 @@ const admin = {
   products: [],
   selectedCode: null,     // kode pesanan yang sedang dibuka (kosong = pesanan pertama)
   receiptCode: null,      // kode pesanan yang struknya sedang ditampilkan
+  shipEditCode: null,     // kode pesanan yang form ongkir manualnya sedang dibuka (pesanan ongkir otomatis)
   form: null,             // form produk yang sedang terbuka (tambah/edit); null = daftar produk
   photoQueue: [],         // foto yang dipilih tapi belum disimpan: { file, url }
   vouchers: [],           // daftar voucher (tab Promo)
@@ -287,15 +288,29 @@ function renderOrderDetail(order) {
       <div class="od-var">${variantLabel(item.color, item.size)} x ${item.qty}${isPending && item.stock < item.qty ? ` <span class="od-warn">stok kurang (${item.stock})</span>` : ''}</div>
     </div>`).join('');
 
-  const shippingRow = isDelivery
-    ? `<div class="od-line"><span>Ongkir</span><span>${order.status === 'menunggu_ongkir' ? 'Belum ditetapkan' : formatRupiah(order.shippingFee)}</span></div>`
+  const hasAutoShipping = isDelivery && Boolean(order.shippingCourier);
+  const courierLabel = hasAutoShipping
+    ? `${String(order.shippingCourier).toUpperCase()} ${order.shippingService}`
     : '';
 
-  const shippingForm = canSetShipping
+  const shippingRow = isDelivery
+    ? `<div class="od-line"><span>Ongkir${courierLabel ? ' (' + escapeHtml(courierLabel) + ')' : ''}</span><span>${order.status === 'menunggu_ongkir' ? 'Belum ditetapkan' : formatRupiah(order.shippingFee)}</span></div>`
+    : '';
+
+  // Ongkir otomatis (pilihan pembeli lewat RajaOngkir): form manual hanya muncul kalau admin memilih mengubahnya
+  const editingShipping = admin.shipEditCode === order.code;
+  const showShippingForm = canSetShipping && (!hasAutoShipping || editingShipping);
+
+  const shippingInfo = hasAutoShipping
+    ? `<p class="od-hint">Pilihan pembeli: ${escapeHtml(courierLabel)}${order.shippingEtd ? ' · ' + escapeHtml(order.shippingEtd) : ''}${Number.isFinite(order.shippingEstimate) ? ' · ' + formatRupiah(order.shippingEstimate) : ''}. Ongkir dihitung otomatis lewat RajaOngkir.</p>`
+      + (canSetShipping && !editingShipping ? '<button type="button" class="od-link" data-a="ship-edit">Ubah ongkir manual</button>' : '')
+    : '';
+
+  const shippingForm = showShippingForm
     ? `<div class="od-lbl">Ongkir (Rp)</div>
        <div class="od-ctl">
          <input id="ship" class="od-in" type="number" min="0" step="500" inputmode="numeric" value="${order.status === 'menunggu_ongkir' ? '' : order.shippingFee}">
-         <button type="button" class="od-btn pri" data-a="ship">Tetapkan Ongkir</button>
+         <button type="button" class="od-btn pri" data-a="ship">${hasAutoShipping ? 'Simpan Ongkir' : 'Tetapkan Ongkir'}</button>
        </div>`
     : '';
 
@@ -349,6 +364,7 @@ function renderOrderDetail(order) {
         <div class="od-line t"><span>Total</span><span>${formatRupiah(order.total)}</span></div>
       </div>
 
+      ${shippingInfo}
       ${shippingForm}
       ${paymentRow}
       ${followUp}
@@ -827,11 +843,18 @@ const adminActions = {
     printReceipt();
   },
 
+  'ship-edit'() {
+    admin.shipEditCode = selectedOrder().code;
+    drawAdmin();
+  },
+
   async ship() {
     const order = selectedOrder();
     const fee = $('#ship').value;
     if (fee === '') return showToast('Isi ongkir dulu', 2400);
-    updateOrder(await staffApi(`orders/${order.id}/shipping`, 'POST', { fee: +fee }));
+    const updated = await staffApi(`orders/${order.id}/shipping`, 'POST', { fee: +fee });
+    admin.shipEditCode = null;
+    updateOrder(updated);
     showToast('Ongkir disimpan', 2400);
   },
 

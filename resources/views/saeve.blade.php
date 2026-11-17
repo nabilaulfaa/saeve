@@ -33,7 +33,7 @@
     {{-- Urutan penting: pdf.js -> common -> api -> app --}}
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <script src="{{ asset('saeve/js/common.js') }}"></script>
-    <script src="{{ asset('saeve/js/api.js') }}"></script>
-    <script src="{{ asset('saeve/js/app.js') }}"></script>
+    <script src="{{ asset('saeve/js/api.js') }}?v={{ filemtime(public_path('saeve/js/api.js')) }}"></script>
+    <script src="{{ asset('saeve/js/app.js') }}?v={{ filemtime(public_path('saeve/js/app.js')) }}"></script>>
 </body>
 </html>

@@ -1957,3 +1957,8 @@ body[data-page="login"] .box .btn.pri {
     padding: 22px 18px 26px;
   }
 }
+
+/* Baris kedua pada pasangan input admin (kurir lalu nomor resi) */
+.od-ctl.od-ctl2 {
+  margin-top: 14px;
+}

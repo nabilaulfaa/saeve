@@ -35,4 +35,10 @@ return [
         ],
     ],
 
+    'rajaongkir' => [
+    'key'      => env('RAJAONGKIR_API_KEY'),
+    'base_url' => env('RAJAONGKIR_BASE_URL'),
+    'origin'   => env('RAJAONGKIR_ORIGIN'),
+    ],
+
 ];

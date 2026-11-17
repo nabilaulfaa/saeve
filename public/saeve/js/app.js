@@ -58,11 +58,49 @@ function saveCart() {
 /* Voucher yang sudah dicek di halaman checkout: { code, type, value, subtotal, discount } atau null */
 let appliedVoucher = null;
 
+/* Ongkir otomatis (RajaOngkir). Samakan SHIPPING_DEFAULT_WEIGHT dengan DEFAULT_ITEM_WEIGHT di StoreController. */
+const SHIPPING_DEFAULT_WEIGHT = 100; // gram per item, dipakai kalau produk belum punya berat
+/* Kurir yang dicek sekaligus saat pembeli memilih kota. Ganti isi daftar ini kalau mau kurir lain. */
+const SHIPPING_COURIERS = ['jne', 'jnt', 'anteraja'];
+let shippingChoice = null; // { destinationId, label, courier, service, cost, etd } atau null
+let shippingFailed = false; // true kalau RajaOngkir gagal dihubungi (pesanan kembali ke cara manual)
+
+function cartWeight() {
+  return cart.reduce((sum, item) => {
+    const found = API.findVariant(item.variantId);
+    const weight = (found && Number(found.product.weight)) || SHIPPING_DEFAULT_WEIGHT;
+    return sum + weight * item.qty;
+  }, 0);
+}
+
 function cartTotal() {
   return cart.reduce((sum, item) => {
     const found = API.findVariant(item.variantId);
     return sum + (found ? found.product.price * item.qty : 0);
   }, 0);
+}
+
+/* Tampilkan diskon, ongkir, dan total di ringkasan checkout */
+function renderTotals() {
+  const box = $('#cktot');
+  const form = $('#co');
+  if (!box || !form) return;
+
+  const ship = form.elements.delivery.value === 'kirim' ? shippingChoice : null;
+  const discount = appliedVoucher ? appliedVoucher.discount : 0;
+  const total = cartTotal() - discount + (ship ? ship.cost : 0);
+
+  let html = '';
+  if (appliedVoucher) {
+    html += `<div class="ck-sub"><span>Diskon (${escapeHtml(appliedVoucher.code)})</span><span>−${formatRupiahDot(discount)}</span></div>`;
+  }
+  if (ship) {
+    html += `<div class="ck-sub"><span>Ongkir (${escapeHtml(ship.label)})</span><span>${formatRupiahDot(ship.cost)}</span></div>`;
+  }
+  if (appliedVoucher || ship) {
+    html += `<div class="ck-sub t"><span>Total</span><span>${formatRupiahDot(total)}</span></div>`;
+  }
+  box.innerHTML = html;
 }
 
 
@@ -199,7 +237,7 @@ function renderDrawer() {
   $('#drFoot').innerHTML = cart.length
     ? `
       <div class="dr-sum"><span>Subtotal</span><span class="price">${formatRupiah(cartTotal())}</span></div>
-      <p class="dr-note">Ongkir ditetapkan admin setelah pesanan dibuat</p>
+      <p class="dr-note">Ongkir dihitung di halaman checkout</p>
       <a class="btn pri dr-go" href="#/checkout" data-dr-go>Lanjut ke checkout</a>`
     : '<a class="btn pri dr-go" href="#/koleksi" data-dr-go>Lihat koleksi</a>';
 }
@@ -552,7 +590,13 @@ const views = {
               <label class="ck-fl"><span>Kota</span><input name="city"></label>
               <label class="ck-fl"><span>Kode pos</span><input name="postal" inputmode="numeric" maxlength="5"></label>
             </div>
-            <p class="ck-note">Ongkir ditetapkan admin setelah pesanan dibuat.</p>
+
+            <label class="ck-fl"><span>Cari kota / kecamatan</span>
+              <input id="shs" placeholder="Ketik min. 3 huruf, mis. kemayoran" autocomplete="off">
+            </label>
+            <div class="shsug" id="shsug"></div>
+            <div id="shres"></div>
+            <p class="ck-note">Pilih kota tujuan, lalu pilih salah satu layanan pengiriman. Ongkir dihitung otomatis.</p>
           </div>
 
           <div class="err" id="er"></div>
@@ -564,7 +608,7 @@ const views = {
           ${summaryRows}
           <div class="ck-line"></div>
           <div class="ck-sub"><span>Subtotal</span><span>${formatRupiahDot(cartTotal())}</span></div>
-          <div id="ckdisc"></div>
+          <div id="cktot"></div>
           <div class="ck-vc">
             <button type="button" class="ck-vbtn" id="vcopen"><span id="vclabel">Pilih voucher</span><span aria-hidden="true">›</span></button>
             <div class="ck-vmsg" id="vcmsg"></div>
@@ -579,9 +623,12 @@ const views = {
     const code = params[0] || '';
     const order = API.getOrder(code);
     const shipping = !order || order.delivery === 'kirim';
-    const message = shipping
-      ? 'Admin akan menghubungi Anda untuk menetapkan ongkir.<br>Setelah itu, lakukan pembayaran transfer.'
-      : 'Admin akan menghubungi Anda untuk konfirmasi pengambilan.<br>Setelah itu, lakukan pembayaran transfer.';
+    const autoShipped = order && order.delivery === 'kirim' && order.status === 'menunggu_bayar';
+    const message = autoShipped
+      ? 'Ongkir sudah dihitung otomatis dan masuk ke total pesanan.<br>Silakan lakukan pembayaran transfer.'
+      : shipping
+        ? 'Admin akan menghubungi Anda untuk menetapkan ongkir.<br>Setelah itu, lakukan pembayaran transfer.'
+        : 'Admin akan menghubungi Anda untuk konfirmasi pengambilan.<br>Setelah itu, lakukan pembayaran transfer.';
 
     return `
       <div class="done-wrap">
@@ -643,7 +690,7 @@ const views = {
         <hr>
         <div class="sum"><span>Subtotal</span><span>${formatRupiah(order.subtotal)}</span></div>
         ${order.discount ? `<div class="sum"><span>Diskon${order.voucherCode ? ' (' + escapeHtml(order.voucherCode) + ')' : ''}</span><span>−${formatRupiah(order.discount)}</span></div>` : ''}
-        <div class="sum"><span>Ongkir</span><span>${shippingPending ? 'Ditetapkan admin' : formatRupiah(order.shippingFee)}</span></div>
+        <div class="sum"><span>Ongkir${order.shippingService ? ' <small>(' + escapeHtml(String(order.shippingCourier).toUpperCase()) + ' ' + escapeHtml(order.shippingService) + ')</small>' : ''}</span><span>${shippingPending ? 'Ditetapkan admin' : formatRupiah(order.shippingFee)}</span></div>
         <div class="sum t"><span>TOTAL</span><span>${shippingPending ? 'Subtotal + ongkir' : formatRupiah(order.total)}</span></div>
         <hr>
         <ul class="tl">${timeline}</ul>
@@ -653,6 +700,7 @@ const views = {
 
       <div class="acts">
         <button class="btn pri" data-print>Cetak struk</button>
+        <button class="btn" data-refresh="${escapeHtml(order.code)}">Perbarui status</button>
         ${chatButtons}
       </div>`;
   },
@@ -700,6 +748,7 @@ function bind() {
   bindCheckoutForm();
   bindTrackForm();
   bindPrint();
+  bindRefresh();
 }
 
 function bindProduct() {
@@ -822,24 +871,23 @@ function bindCheckoutForm() {
     addressBox.style.display = form.elements.delivery.value === 'kirim' ? '' : 'none';
   });
 
+  bindShipping(form);
+
   // Voucher: pelanggan memilih dari daftar voucher yang tersedia (tanpa mengetik kode)
   const voucherButton = $('#vcopen');
   const voucherLabel = $('#vclabel');
   const voucherMsg = $('#vcmsg');
-  const discountBox = $('#ckdisc');
 
   const showVoucher = () => {
+    renderTotals();
+
     if (!appliedVoucher) {
-      discountBox.innerHTML = '';
       voucherLabel.textContent = 'Pilih voucher';
       voucherButton.classList.remove('on');
       voucherMsg.innerHTML = '';
       return;
     }
 
-    discountBox.innerHTML = `
-      <div class="ck-sub"><span>Diskon (${escapeHtml(appliedVoucher.code)})</span><span>−${formatRupiahDot(appliedVoucher.discount)}</span></div>
-      <div class="ck-sub t"><span>Total</span><span>${formatRupiahDot(cartTotal() - appliedVoucher.discount)}</span></div>`;
     voucherLabel.textContent = `${appliedVoucher.code} · hemat ${formatRupiah(appliedVoucher.discount)}`;
     voucherButton.classList.add('on');
     voucherMsg.innerHTML = '<button type="button" class="ck-vrm" id="vcrm">Lepas voucher</button>';
@@ -884,10 +932,22 @@ function bindCheckoutForm() {
     ) {
       return (errorBox.textContent = 'Lengkapi alamat, kota, dan kode pos 5 angka.');
     }
+    // Pembeli wajib memilih layanan kurir, kecuali RajaOngkir sedang tidak bisa dihubungi
+    if (data.delivery === 'kirim' && !shippingChoice && !shippingFailed) {
+      return (errorBox.textContent = 'Cari kota tujuan, lalu pilih kurir dan layanan pengiriman.');
+    }
+
+    // Kirim pilihan ongkir (kalau ada). Harganya dihitung ulang oleh server.
+    if (data.delivery === 'kirim' && shippingChoice) {
+      data.shipping_destination_id = shippingChoice.destinationId;
+      data.shipping_courier = shippingChoice.courier;
+      data.shipping_service = shippingChoice.service;
+    }
 
     try {
       const order = await API.createOrder(data, cart);
       appliedVoucher = null;
+      shippingChoice = null;
       cart = [];
       saveCart();
       location.hash = '#/dibuat/' + order.code;
@@ -895,6 +955,106 @@ function bindCheckoutForm() {
       errorBox.textContent = error.message;
     }
   };
+}
+
+function bindShipping(form) {
+  const search = $('#shs');
+  if (!search) return;
+
+  const suggestions = $('#shsug');
+  const results = $('#shres');
+  let destination = null;
+  let timer = null;
+  shippingChoice = null;
+  shippingFailed = false;
+
+  async function loadCosts() {
+    shippingChoice = null;
+    renderTotals();
+    results.innerHTML = '<p class="ck-note">Menghitung ongkir…</p>';
+
+    try {
+      const list = await API.shippingCost(destination.id, cartWeight(), SHIPPING_COURIERS);
+      shippingFailed = false;
+      // Layanan trucking (JTR) disembunyikan karena untuk barang berat
+      const services = list
+        .filter((s) => !String(s.service).toUpperCase().startsWith('JTR'))
+        .sort((a, b) => a.cost - b.cost);
+
+      if (!services.length) {
+        results.innerHTML = '<p class="ck-note">Belum ada layanan pengiriman yang tersedia ke tujuan ini.</p>';
+        return;
+      }
+
+      results.innerHTML = services.map((s, i) => `
+        <button type="button" class="shopt" data-i="${i}">
+          <span><b>${escapeHtml(s.code.toUpperCase())} ${escapeHtml(s.service)}</b><small>${escapeHtml(s.description)} · ${escapeHtml(s.etd)}</small></span>
+          <span>${formatRupiah(s.cost)}</span>
+        </button>`).join('');
+
+      results.onclick = (event) => {
+        const button = event.target.closest('.shopt');
+        if (!button) return;
+        const s = services[+button.dataset.i];
+        shippingChoice = {
+          destinationId: destination.id,
+          label: `${s.code.toUpperCase()} ${s.service}`,
+          courier: s.code,
+          service: s.service,
+          cost: s.cost,
+          etd: s.etd,
+        };
+        $$('.shopt').forEach((b) => b.classList.toggle('on', b === button));
+        renderTotals();
+      };
+    } catch (error) {
+      shippingFailed = true;
+      results.innerHTML = '<p class="ck-note">Ongkir belum bisa dihitung otomatis. Kamu tetap bisa membuat pesanan, admin akan menetapkan ongkirnya.</p>';
+    }
+  }
+
+  // Enter di kolom cari tidak boleh men-submit form
+  search.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') event.preventDefault();
+  });
+
+  search.addEventListener('input', () => {
+    destination = null;
+    shippingChoice = null;
+    renderTotals();
+    results.innerHTML = '';
+    clearTimeout(timer);
+
+    const q = search.value.trim();
+    if (q.length < 3) { suggestions.innerHTML = ''; return; }
+
+    timer = setTimeout(async () => {
+      try {
+        const list = await API.searchDestination(q);
+        shippingFailed = false;
+        suggestions.innerHTML = list.length
+          ? list.map((d, i) => `<button type="button" class="shsg" data-i="${i}">${escapeHtml(d.label)}</button>`).join('')
+          : '<p class="ck-note">Lokasi tidak ditemukan.</p>';
+
+        suggestions.onclick = (event) => {
+          const button = event.target.closest('.shsg');
+          if (!button) return;
+          destination = list[+button.dataset.i];
+          search.value = destination.label;
+          suggestions.innerHTML = '';
+          // Isi otomatis kolom kota & kode pos (tetap bisa diedit)
+          form.elements.city.value = destination.city_name;
+          form.elements.postal.value = destination.zip_code;
+          loadCosts();
+        };
+      } catch (error) {
+        shippingFailed = true;
+        suggestions.innerHTML = '<p class="ck-note">Pencarian lokasi sedang bermasalah. Kamu tetap bisa membuat pesanan, admin akan menetapkan ongkirnya.</p>';
+      }
+    }, 400);
+  });
+
+  form.addEventListener('change', renderTotals); // sembunyikan ongkir kalau pilih "Ambil di toko"
 }
 
 function bindTrackForm() {
@@ -915,6 +1075,26 @@ function bindTrackForm() {
 function bindPrint() {
   const button = $('[data-print]');
   if (button) button.onclick = () => print();
+}
+
+/* Struk: ambil ulang data pesanan dari server (status, resi) lalu gambar ulang halaman */
+function bindRefresh() {
+  const button = $('[data-refresh]');
+  if (!button) return;
+
+  button.onclick = async () => {
+    const order = API.getOrder(button.dataset.refresh);
+    if (!order) return;
+
+    button.disabled = true;
+    const fresh = await API.lookupOrder(order.code, order.phone);
+    if (fresh) {
+      route();
+    } else {
+      showToast('Gagal memperbarui. Coba lagi.');
+      button.disabled = false;
+    }
+  };
 }
 
 

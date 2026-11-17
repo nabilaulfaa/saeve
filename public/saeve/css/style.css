@@ -1890,3 +1890,125 @@ body.lock {
 @media (max-width: 760px) {
   .pd-gal { margin-top: 0; }
 }
+
+/* ===== Estimasi ongkir di checkout ===== */
+.ck-fl select {
+  display: block;
+  width: 100%;
+  height: 52px;
+  padding: 0 20px;
+  border: 1px solid var(--copper);
+  border-radius: 14px;
+  background: #fff;
+  font: inherit;
+  color: var(--body);
+}
+
+.shsug {
+  margin: -12px 0 22px;
+}
+
+.shsg {
+  display: block;
+  width: 100%;
+  padding: 10px 16px;
+  border: 1px solid var(--line);
+  border-top: 0;
+  background: #fff;
+  font: inherit;
+  font-size: 1rem;
+  text-align: left;
+  color: var(--body);
+  cursor: pointer;
+}
+
+.shsg:first-child { border-top: 1px solid var(--line); border-radius: 10px 10px 0 0; }
+.shsg:last-child { border-radius: 0 0 10px 10px; }
+.shsg:hover { background: var(--soft); }
+
+#shres { margin-bottom: 8px; }
+
+.shopt {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  margin-bottom: 10px;
+  padding: 12px 16px;
+  border: 1px solid var(--copper);
+  border-radius: 14px;
+  background: #fff;
+  font: inherit;
+  text-align: left;
+  color: var(--body);
+  cursor: pointer;
+}
+
+.shopt small { display: block; font-size: .9rem; color: var(--mut); }
+.shopt.on { background: #EAD9C0; border-color: var(--gold); }
+.ck-est { font-style: italic; }
+
+/* ===== Lacak paket (struk pembeli) ===== */
+.trk-box {
+  max-width: 380px;
+  margin: 14px auto 0;
+}
+
+.trk-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 10px;
+}
+
+.trk-head b {
+  font-size: 1.15rem;
+  color: var(--gold);
+}
+
+.trk-head span {
+  font-size: .9rem;
+  color: var(--mut);
+}
+
+.trk-ok {
+  margin: 0 0 10px;
+  color: #3F6B4B;
+}
+
+.trk-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.trk-list li {
+  position: relative;
+  margin-left: 5px;
+  padding: 0 0 12px 18px;
+  border-left: 1px solid var(--line);
+}
+
+.trk-list li::before {
+  content: "";
+  position: absolute;
+  top: 6px;
+  left: -5px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--gold);
+}
+
+.trk-list li small {
+  display: block;
+  font-size: .85rem;
+  color: var(--mut);
+}
+
+@media print {
+  .trk-box {
+    display: none;
+  }
+}
