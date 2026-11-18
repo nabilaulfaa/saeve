@@ -583,15 +583,8 @@ class StaffController extends Controller
             'online' => $perChannel('online'),
             'offline' => $perChannel('pos'),
             'top' => array_values($top),
-            'orders' => $orders->map(fn ($o) => [
-                'code' => $o->code,
-                'channel' => $o->channel === 'pos' ? 'Offline' : 'Online',
-                'createdAt' => $o->created_at->toIso8601String(),
-                'customer' => $o->customer_name,
-                'status' => $o->status,
-                'total' => $o->total,
-                'payment' => $o->payment_method,
-            ])->values(),
+            // Data lengkap tiap transaksi (item, diskon, ongkir, pembayaran) untuk panel rincian di tab Laporan
+            'orders' => $orders->map(fn ($o) => $this->oj($o, collect()))->values(),
         ];
     }
 

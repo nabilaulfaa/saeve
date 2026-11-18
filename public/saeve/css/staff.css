@@ -281,6 +281,10 @@ body[data-page="admin"] main {
   border-bottom: 1px solid var(--gold);
 }
 
+.od-blk + .od-items {
+  margin-top: 28px;
+}
+
 .od-item {
   padding-bottom: 10px;
 }
@@ -1961,4 +1965,76 @@ body[data-page="login"] .box .btn.pri {
 /* Baris kedua pada pasangan input admin (kurir lalu nomor resi) */
 .od-ctl.od-ctl2 {
   margin-top: 14px;
+}
+
+/* Lencana pembeda Diantar / Ambil di toko (gaya sama untuk keduanya) */
+.od-tag {
+  display: inline-block;
+  margin-left: 10px;
+  padding: 2px 10px;
+  border: 1px solid var(--gold);
+  border-radius: 999px;
+  background: transparent;
+  font-size: var(--t-xs, .75rem);
+  font-weight: 600;
+  letter-spacing: .12em;
+  line-height: 1.5;
+  text-transform: uppercase;
+  white-space: nowrap;
+  vertical-align: middle;
+  color: var(--gold);
+}
+
+
+/* =====================================================================
+   Admin: halaman Pesanan memakai dua panel (daftar di kiri, detail di kanan)
+   yang masing-masing bisa di-scroll sendiri, seperti aplikasi email. Halamannya
+   sendiri tidak ikut memanjang, jadi admin tidak perlu turun lalu naik lagi.
+   ===================================================================== */
+body[data-page="admin"] .orow {
+  flex: none;
+}
+
+@media (min-width: 861px) {
+  body[data-page="admin"] .split {
+    /* tinggi layar dikurangi header (70) + bar tab (47) + jarak atas (52) + jarak bawah (64) */
+    height: calc(100vh - 233px);
+    min-height: 460px;
+    align-items: stretch;
+  }
+
+  body[data-page="admin"] .split > .lst,
+  body[data-page="admin"] .split > div:last-child {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(182, 128, 91, .5) transparent;
+  }
+}
+
+/* Layar sempit: daftar ada di atas detail, dibatasi setengah layar */
+@media (max-width: 860px) {
+  body[data-page="admin"] .lst {
+    max-height: 50vh;
+    overflow-y: auto;
+  }
+}
+
+
+/* Tanggal di baris daftar (tab Laporan) */
+.orow-date {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--t-sm, .95rem);
+  letter-spacing: var(--ls-text, .08em);
+  color: var(--mut);
+}
+
+/* Daftar transaksi + rincian di tab Laporan: tinggi tetap, masing-masing panel bisa di-scroll */
+@media (min-width: 861px) {
+  body[data-page="admin"] .split.rp-split {
+    height: 640px;
+    min-height: 0;
+  }
 }

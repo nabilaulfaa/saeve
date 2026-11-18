@@ -114,12 +114,14 @@ function renderReceipt(order) {
 
   return `
     <div class="rc">
-      <span class="logo">SAEV${BRAND_E}</span>
+      <span class="logo">SAEVÉ</span>
       <p class="sub small">${BRAND_TAGLINE}</p>
       <hr>
       <div class="sum"><span>No.</span><b>${escapeHtml(order.code)}</b></div>
       <div class="sum"><span>Tanggal</span><span>${formatDateTime(order.createdAt)}</span></div>
       <div class="sum"><span>${isPos ? 'Kasir' : 'Pemesan'}</span><span>${escapeHtml(isPos ? order.cashier : order.name)}</span></div>
+      ${isPos ? '' : `<div class="sum"><span>Penerimaan</span><b>${isDelivery ? 'Diantar' : 'Ambil di toko'}</b></div>
+      <p class="rc-note">${escapeHtml(isDelivery ? 'Diantar ke: ' + [order.address, order.city].filter(Boolean).join(', ') : 'Ambil di: ' + STORE_ADDRESS)}</p>`}
       <hr>
       ${itemRows}
       <hr>
@@ -156,6 +158,7 @@ const admin = {
   vouchers: [],           // daftar voucher (tab Promo)
   voucherForm: emptyVoucherForm(),   // isi form voucher; id null = voucher baru
   report: null,
+  reportCode: null,       // kode transaksi yang rinciannya dibuka di tab Laporan (kosong = yang pertama)
   from: toDateInputValue(thirtyDaysAgo),
   to: toDateInputValue(today),
   channel: 'semua',
@@ -197,7 +200,19 @@ function ordersNeedingAction() {
 }
 
 /* Pesanan yang sedang dibuka. Kalau belum ada yang dipilih, pakai pesanan pertama. */
-const selectedOrder = () => admin.orders.find((order) => order.code === admin.selectedCode) || admin.orders[0];
+/* Pesanan yang masih berjalan. Pesanan yang sudah selesai pindah ke tab Laporan. */
+const activeOrders = () => admin.orders.filter((order) => order.status !== 'selesai');
+
+const selectedOrder = () => {
+  const list = activeOrders();
+  return list.find((order) => order.code === admin.selectedCode) || list[0];
+};
+
+/* Transaksi yang rinciannya sedang dibuka di tab Laporan */
+const selectedReportOrder = () => {
+  const list = admin.report ? admin.report.orders : [];
+  return list.find((order) => order.code === admin.reportCode) || list[0];
+};
 
 function loadReport() {
   return staffApi(`report?from=${admin.from}&to=${admin.to}&channel=${admin.channel}`);
@@ -207,6 +222,8 @@ function updateOrder(order) {
   admin.orders = admin.orders.map((existing) => (existing.code === order.code ? order : existing));
   drawAdmin();
 }
+
+let drawnOrderCode = null; // pesanan yang tampil di panel detail pada penggambaran terakhir
 
 function drawAdmin() {
   const tabs = [
@@ -229,6 +246,13 @@ function drawAdmin() {
         ? renderPromoTab()
         : renderReportTab();
 
+  // Simpan posisi scroll daftar & detail pesanan supaya tidak melompat ke atas setiap kali digambar ulang
+  const listPane = $('.lst');
+  const detailPane = $('.split > div:last-child');
+  const listScroll = listPane ? listPane.scrollTop : 0;
+  const detailScroll = detailPane ? detailPane.scrollTop : 0;
+  const previousCode = drawnOrderCode;
+
   // Tab ada di bar sendiri di bawah header (#tabs di admin.blade.php)
   const tabBar = $('#tabs');
   if (tabBar) {
@@ -237,50 +261,83 @@ function drawAdmin() {
   } else {
     app.innerHTML = `<div class="tabs">${tabButtons}</div>` + content;
   }
+
+  const shown = admin.tab === 'orders' ? selectedOrder() : admin.tab === 'reports' ? selectedReportOrder() : null;
+  const currentCode = shown ? shown.code : null;
+
+  // Daftar tetap di posisinya; detail hanya dipertahankan kalau pesanannya sama (pesanan lain mulai dari atas)
+  const newList = $('.lst');
+  const newDetail = $('.split > div:last-child');
+  if (newList) newList.scrollTop = listScroll;
+  if (newDetail && currentCode && currentCode === previousCode) newDetail.scrollTop = detailScroll;
+
+  drawnOrderCode = currentCode;
 }
 
 
 /* ---- Tab: Pesanan ---- */
 
+/* Alamat toko, tampil di pesanan "Ambil di toko" */
+const STORE_ADDRESS = 'Perum Villa Asri Blok B4 Sukowidi No. 1, Lingkungan Sukowidi, Klatak, Kalipuro, Banyuwangi, Jawa Timur 68421';
+
+/* Lencana pembeda cara penerimaan: "Diantar" atau "Ambil di toko" (bukan "Dikirim", supaya tidak tertukar dengan status pesanan) */
+function modeTag(order) {
+  if (order.channel === 'pos') return '<span class="od-tag">Kasir</span>';
+  return order.delivery === 'kirim'
+    ? '<span class="od-tag">Diantar</span>'
+    : '<span class="od-tag">Ambil di toko</span>';
+}
+
 /* "Rahul - Online" (dikirim) atau "Titut - Toko" (ambil di toko) */
 function orderLabel(order) {
+  if (order.channel === 'pos') return `${order.name} - Kasir`;
   return `${order.name} - ${order.delivery === 'kirim' ? 'Online' : 'Toko'}`;
 }
 
-function renderOrdersTab() {
-  const selected = selectedOrder();
-
-  const orderRows = admin.orders.map((order) => `
-    <button type="button" class="orow ${selected && order.code === selected.code ? 'on' : ''}" data-a="select" data-v="${escapeHtml(order.code)}">
+/* Satu baris di daftar (dipakai tab Pesanan dan tab Laporan) */
+function orderRowHtml(order, { action, selectedCode, showDate = false }) {
+  return `
+    <button type="button" class="orow ${order.code === selectedCode ? 'on' : ''}" data-a="${action}" data-v="${escapeHtml(order.code)}">
       <span class="orow-line">
-        <span class="orow-code">${escapeHtml(order.code)}</span>
+        <span class="orow-code">${escapeHtml(order.code)}${modeTag(order)}</span>
         <span class="orow-total">${formatRupiah(order.total)}</span>
       </span>
       <span class="orow-line">
         <span class="orow-name">${escapeHtml(orderLabel(order))}</span>
         <span class="orow-st ${ACTION_STATUSES.includes(order.status) ? 'act' : ''}">${STATUS_LABELS[order.status] || order.status}</span>
       </span>
-    </button>
-  `).join('') || '<p class="sub od-empty">Belum ada pesanan.</p>';
+      ${showDate ? `<span class="orow-date">${formatDateTime(order.createdAt)}</span>` : ''}
+    </button>`;
+}
+
+function renderOrdersTab() {
+  const selected = selectedOrder();
+  const empty = 'Tidak ada pesanan yang sedang berjalan. Pesanan yang sudah selesai ada di tab Laporan.';
+
+  const orderRows = activeOrders()
+    .map((order) => orderRowHtml(order, { action: 'select', selectedCode: selected && selected.code }))
+    .join('') || `<p class="sub od-empty">${empty}</p>`;
 
   return `
     <div class="split">
       <div class="lst">${orderRows}</div>
-      <div>${selected ? renderOrderDetail(selected) : '<div class="od"><p class="sub">Belum ada pesanan.</p></div>'}</div>
+      <div>${selected ? renderOrderDetail(selected) : `<div class="od"><p class="sub">${empty}</p></div>`}</div>
     </div>`;
 }
 
-function renderOrderDetail(order) {
+/* readOnly = dipakai di tab Laporan: hanya rincian, tanpa tombol ongkir / verifikasi / ubah status. */
+function renderOrderDetail(order, { readOnly = false } = {}) {
+  const isPos = order.channel === 'pos';
   const isDelivery = order.delivery === 'kirim';
   const isPending = ['menunggu_ongkir', 'menunggu_bayar', 'tindak_lanjut'].includes(order.status);
   const canSetShipping = isDelivery && !order.verified && ['menunggu_ongkir', 'menunggu_bayar'].includes(order.status);
   const canVerify = order.status === 'menunggu_bayar';
   const receiptShown = admin.receiptCode === order.code;
 
-  const channelLabel = `${isDelivery ? 'Online' : 'Toko'} - ${order.payment === 'tunai' ? 'Tunai' : 'Transfer'}`;
+  const channelLabel = `${isPos ? 'Kasir' : isDelivery ? 'Online' : 'Toko'} - ${order.payment === 'tunai' ? 'Tunai' : 'Transfer'}`;
   const address = isDelivery
     ? escapeHtml([order.address, order.city, order.postal].filter(Boolean).join(', '))
-    : 'Ambil di toko';
+    : escapeHtml(STORE_ADDRESS);
 
   const itemRows = order.items.map((item) => `
     <div class="od-item">
@@ -338,6 +395,19 @@ function renderOrderDetail(order) {
     })
     .join('');
 
+  // Tampilan tab Laporan: pembayaran & status hanya dibaca. Kasir menampilkan uang diterima & kembalian.
+  const cashLine = isPos && order.cash != null
+    ? `<p class="od-hint">Tunai ${formatRupiah(order.cash)} · Kembalian ${formatRupiah(order.change ?? 0)}</p>`
+    : '';
+  const readOnlyControls = `
+      <div class="od-ctl od-pay">
+        <span class="od-paytxt">Pembayaran : ${order.verified ? 'Terverifikasi' : 'Belum Terverifikasi'}</span><span></span>
+      </div>
+      ${cashLine}
+      <div class="od-ctl od-pay">
+        <span class="od-paytxt">Status : ${STATUS_LABELS[order.status] || order.status}</span><span></span>
+      </div>`;
+
   return `
     <div class="od">
       <div class="od-head">
@@ -351,8 +421,11 @@ function renderOrderDetail(order) {
         <div class="od-m">${escapeHtml(order.phone)} · ${formatDateTime(order.createdAt)}</div>
       </div>
       <div class="od-blk">
-        <div class="od-k">Pengambilan</div>
-        <div class="od-v">${address}</div>
+        <div class="od-k">Penerimaan${modeTag(order)}</div>
+        ${isPos
+          ? `<div class="od-v">Dibeli langsung di toko</div>${order.cashier ? `<div class="od-m">Dilayani kasir ${escapeHtml(order.cashier)}</div>` : ''}`
+          : `<div class="od-v">${address}</div>
+        ${isDelivery ? '' : '<div class="od-m">Pelanggan mengambil sendiri. Hubungi lewat WhatsApp kalau pesanan sudah siap.</div>'}`}
       </div>
 
       <div class="od-items">${itemRows}</div>
@@ -364,7 +437,7 @@ function renderOrderDetail(order) {
         <div class="od-line t"><span>Total</span><span>${formatRupiah(order.total)}</span></div>
       </div>
 
-      ${shippingInfo}
+      ${readOnly ? readOnlyControls : `${shippingInfo}
       ${shippingForm}
       ${paymentRow}
       ${followUp}
@@ -373,9 +446,9 @@ function renderOrderDetail(order) {
       <div class="od-ctl">
         <select id="st" class="od-in od-sel" aria-label="Status pesanan" ${allowed.length ? '' : 'disabled'}>${statusOptions}</select>
         <button type="button" class="od-btn gray" id="st-go" data-a="status" disabled>Ubah Status</button>
-      </div>
+      </div>`}
 
-      <button type="button" class="od-link" data-a="receipt">${receiptShown ? 'Tutup struk' : 'Lihat struk'}</button>
+      <button type="button" class="od-link" data-a="receipt" data-v="${escapeHtml(order.code)}">${receiptShown ? 'Tutup struk' : 'Lihat struk'}</button>
     </div>
     ${receiptShown ? renderReceipt(order) + '<div class="acts"><button class="btn pri" data-a="print">Cetak struk</button></div>' : ''}`;
 }
@@ -773,16 +846,11 @@ function renderReportTab() {
     <tr><td>${index + 1}</td><td>${escapeHtml(row.name)}</td><td>${row.qty}</td><td>${formatRupiah(row.revenue)}</td></tr>
   `).join('') || '<tr><td colspan="4">Belum ada data.</td></tr>';
 
-  const orderRows = report.orders.map((order) => `
-    <tr>
-      <td>${escapeHtml(order.code)}</td>
-      <td>${formatDateTime(order.createdAt)}</td>
-      <td>${escapeHtml(order.channel)}</td>
-      <td>${escapeHtml(order.customer || '-')}</td>
-      <td>${statusBadge(order.status)}</td>
-      <td>${formatRupiah(order.total)}</td>
-    </tr>
-  `).join('') || '<tr><td colspan="6">Belum ada transaksi pada periode ini.</td></tr>';
+  const selectedTx = selectedReportOrder();
+  const noTx = 'Belum ada transaksi pada periode ini.';
+  const txRows = report.orders
+    .map((order) => orderRowHtml(order, { action: 'rp-open', selectedCode: selectedTx && selectedTx.code, showDate: true }))
+    .join('') || `<p class="sub od-empty">${noTx}</p>`;
 
   return filterBar + `
     <div class="rp-stats">
@@ -802,11 +870,9 @@ function renderReportTab() {
     </div>
 
     <h2 class="l">Transaksi</h2>
-    <div class="tw">
-      <table class="rp-tbl">
-        <tr><th>Kode</th><th>Tanggal</th><th>Kanal</th><th>Pelanggan</th><th>Status</th><th>Total</th></tr>
-        ${orderRows}
-      </table>
+    <div class="split rp-split">
+      <div class="lst">${txRows}</div>
+      <div>${selectedTx ? renderOrderDetail(selectedTx, { readOnly: true }) : `<div class="od"><p class="sub">${noTx}</p></div>`}</div>
     </div>`;
 }
 
@@ -833,9 +899,15 @@ const adminActions = {
     drawAdmin();
   },
 
-  receipt() {
-    const order = selectedOrder();
-    admin.receiptCode = admin.receiptCode === order.code ? null : order.code;
+  receipt(el) {
+    const code = el.dataset.v || selectedOrder().code;
+    admin.receiptCode = admin.receiptCode === code ? null : code;
+    drawAdmin();
+  },
+
+  'rp-open'(el) {
+    admin.reportCode = el.dataset.v;
+    admin.receiptCode = null;
     drawAdmin();
   },
 
@@ -872,8 +944,9 @@ const adminActions = {
 
     if (status === 'dibatalkan' && !confirm('Batalkan pesanan ' + order.code + '? Stok akan dikembalikan bila sudah dikurangi.')) return;
 
-    updateOrder(await staffApi(`orders/${order.id}/status`, 'POST', { status }));
-    showToast('Status diperbarui', 2400);
+    const updated = await staffApi(`orders/${order.id}/status`, 'POST', { status });
+    updateOrder(updated);
+    showToast(updated.status === 'selesai' ? 'Pesanan selesai dan dipindahkan ke tab Laporan' : 'Status diperbarui', 2800);
   },
 
   /* ---- Foto produk ---- */

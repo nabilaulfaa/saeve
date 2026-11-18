@@ -11,7 +11,25 @@ const CATALOG_PDF_URL = '/saeve/SAEVE-Catalog-2026.pdf';
 const PDFJS_WORKER_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
 const CATALOG_CATEGORIES = ['semua', ...PRODUCT_CATEGORIES];
-const ORDER_STEPS = ['menunggu_ongkir', 'menunggu_bayar', 'diproses', 'dikirim', 'selesai'];
+/* Alamat toko, tampil di struk pesanan "Ambil di toko" */
+const STORE_ADDRESS = 'Perum Villa Asri Blok B4 Sukowidi No. 1, Lingkungan Sukowidi, Klatak, Kalipuro, Banyuwangi, Jawa Timur 68421';
+
+/*
+ * Tahap pesanan yang ditampilkan di struk.
+ * - Ambil di toko: tanpa ongkir dan pengiriman, diganti "Siap diambil".
+ * - Diantar dengan ongkir otomatis (RajaOngkir): tidak ada tahap "Menunggu ongkir".
+ * - Diantar dengan ongkir manual: tahap "Menunggu ongkir" tetap ada.
+ */
+function orderSteps(order) {
+  if (order.delivery !== 'kirim') return ['menunggu_bayar', 'diproses', 'siap_ambil', 'selesai'];
+  return order.shippingCourier
+    ? ['menunggu_bayar', 'diproses', 'dikirim', 'selesai']
+    : ['menunggu_ongkir', 'menunggu_bayar', 'diproses', 'dikirim', 'selesai'];
+}
+
+function stepLabel(step) {
+  return STATUS_LABELS[step] || (step === 'siap_ambil' ? 'Siap diambil' : step);
+}
 
 /* Isi dengan path foto galeri, contoh: ['/saeve/img/g1.jpg', ...].
  * Kosong = otomatis memakai foto produk dari admin; kalau belum ada foto, kartu placeholder. */
@@ -63,6 +81,7 @@ const SHIPPING_DEFAULT_WEIGHT = 100; // gram per item, dipakai kalau produk belu
 /* Kurir yang dicek sekaligus saat pembeli memilih kota. Ganti isi daftar ini kalau mau kurir lain. */
 const SHIPPING_COURIERS = ['jne', 'jnt', 'anteraja'];
 let shippingChoice = null; // { destinationId, label, courier, service, cost, etd } atau null
+let shippingDestination = null; // wilayah tujuan yang dipilih pembeli (hasil pencarian RajaOngkir) atau null
 let shippingFailed = false; // true kalau RajaOngkir gagal dihubungi (pesanan kembali ke cara manual)
 
 function cartWeight() {
@@ -144,14 +163,18 @@ function productCard(product) {
 /* ===== Galeri (carousel) ===== */
 
 function galleryHtml() {
-  // Otomatis: satu foto sampul dari tiap produk (maks. 9), kecuali GALLERY_PHOTOS diisi manual
+  // Otomatis: satu foto sampul dari tiap produk (maks. 9); kartunya bisa diklik ke halaman produk.
+  // Kalau GALLERY_PHOTOS diisi manual, kartunya hanya foto (tanpa tautan).
   const auto = API.getProducts('semua')
-    .flatMap((product) => (product.photos || []).slice(0, 1).map((photo) => photo.url))
-    .slice(0, 9);
-  const photos = GALLERY_PHOTOS.length ? GALLERY_PHOTOS : auto;
+    .filter((product) => (product.photos || []).length)
+    .slice(0, 9)
+    .map((product) => ({ src: product.photos[0].url, id: product.id, name: product.name }));
+  const items = GALLERY_PHOTOS.length ? GALLERY_PHOTOS.map((src) => ({ src })) : auto;
 
-  const cards = photos.length
-    ? photos.map((src) => `<div class="car-card"><img src="${escapeHtml(src)}" alt="" loading="lazy"></div>`)
+  const cards = items.length
+    ? items.map((item) => item.id
+      ? `<a class="car-card" href="#/produk/${item.id}" aria-label="Lihat ${escapeHtml(item.name)}"><img src="${escapeHtml(item.src)}" alt="" loading="lazy"><span class="car-cap">${escapeHtml(item.name)}</span></a>`
+      : `<div class="car-card"><img src="${escapeHtml(item.src)}" alt="" loading="lazy"></div>`)
     : Array.from({ length: 6 }, () => '<div class="car-card"></div>');
   const pages = Math.ceil(cards.length / 3);
   const dots = Array.from({ length: pages }, (_, i) => `<i class="${i === 0 ? 'on' : ''}"></i>`).join('');
@@ -585,18 +608,26 @@ const views = {
           </div>
 
           <div id="ad">
-            <label class="ck-fl"><span>Alamat</span><textarea name="address" autocomplete="street-address"></textarea></label>
-            <div class="ck-two">
-              <label class="ck-fl"><span>Kota</span><input name="city"></label>
-              <label class="ck-fl"><span>Kode pos</span><input name="postal" inputmode="numeric" maxlength="5"></label>
+            <div class="ck-fl">
+              <span>Kecamatan / kelurahan tujuan</span>
+              <div class="ck-search" id="shbox">
+                <input id="shs" placeholder="Ketik min. 3 huruf, mis. kalipuro" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="shsug">
+                <div class="shsug" id="shsug" role="listbox"></div>
+              </div>
+              <div class="ck-picked" id="shpick" hidden>
+                <div><b id="shpl"></b><small id="shpz"></small></div>
+                <button type="button" class="ck-vrm" id="shchg">Ubah</button>
+              </div>
             </div>
 
-            <label class="ck-fl"><span>Cari kota / kecamatan</span>
-              <input id="shs" placeholder="Ketik min. 3 huruf, mis. kemayoran" autocomplete="off">
-            </label>
-            <div class="shsug" id="shsug"></div>
+            <label class="ck-fl"><span>Detail alamat</span><textarea name="address" autocomplete="street-address" placeholder="Nama jalan, nomor rumah, RT/RW, patokan"></textarea></label>
+
+            <div class="ck-two" id="shmanual" hidden>
+              <label class="ck-fl"><span>Kota</span><input name="city" autocomplete="address-level2"></label>
+              <label class="ck-fl"><span>Kode pos</span><input name="postal" inputmode="numeric" maxlength="5" autocomplete="postal-code"></label>
+            </div>
+
             <div id="shres"></div>
-            <p class="ck-note">Pilih kota tujuan, lalu pilih salah satu layanan pengiriman. Ongkir dihitung otomatis.</p>
           </div>
 
           <div class="err" id="er"></div>
@@ -659,7 +690,9 @@ const views = {
     if (!order) return '<p>Struk tidak ditemukan.</p>';
 
     const date = new Date(order.createdAt).toLocaleString('id-ID');
-    const currentStep = ORDER_STEPS.indexOf(order.status);
+    const isPickup = order.delivery !== 'kirim';
+    const steps = orderSteps(order);
+    const currentStep = steps.indexOf(order.status);
     // Ongkir baru "belum ditetapkan" selama status masih menunggu_ongkir (ongkir Rp 0 / gratis tetap dianggap sudah ditetapkan)
     const shippingPending = order.delivery === 'kirim' && order.status === 'menunggu_ongkir';
 
@@ -669,9 +702,13 @@ const views = {
         <span>${formatRupiah(item.qty * item.unitPrice)}</span>
       </div>`).join('');
 
-    const timeline = ORDER_STEPS.map((step, index) => `
-      <li class="${index <= currentStep ? 'on' : ''}">${STATUS_LABELS[step]}</li>
+    const timeline = steps.map((step, index) => `
+      <li class="${index <= currentStep ? 'on' : ''}">${stepLabel(step)}</li>
     `).join('');
+
+    const receiveNote = isPickup
+      ? `Ambil di: ${STORE_ADDRESS}. Kami akan menghubungi lewat WhatsApp saat pesanan siap diambil.`
+      : 'Diantar ke: ' + [order.address, order.city].filter(Boolean).join(', ');
 
     const chatButtons = WA_CONTACTS.map((contact) => `
       <a class="btn" target="_blank" href="${whatsappLink(contact.number, 'Halo, saya ingin konfirmasi pesanan ' + order.code)}">Chat ${contact.name}</a>
@@ -679,18 +716,20 @@ const views = {
 
     return pageHeader('Pesanan ' + escapeHtml(order.code), STATUS_LABELS[order.status] || order.status) + `
       <div class="rc">
-        <span class="logo">SAEV${BRAND_E}</span>
+        <span class="logo">SAEVÉ</span>
         <p class="sub small">${BRAND_TAGLINE}</p>
         <hr>
         <div class="sum"><span>No.</span><b>${escapeHtml(order.code)}</b></div>
         <div class="sum"><span>Tanggal</span><span>${date}</span></div>
         <div class="sum"><span>Pemesan</span><span>${escapeHtml(order.name)}</span></div>
+        <div class="sum"><span>Penerimaan</span><b>${isPickup ? 'Ambil di toko' : 'Diantar'}</b></div>
+        <p class="rc-note">${escapeHtml(receiveNote)}</p>
         <hr>
         ${itemRows}
         <hr>
         <div class="sum"><span>Subtotal</span><span>${formatRupiah(order.subtotal)}</span></div>
         ${order.discount ? `<div class="sum"><span>Diskon${order.voucherCode ? ' (' + escapeHtml(order.voucherCode) + ')' : ''}</span><span>−${formatRupiah(order.discount)}</span></div>` : ''}
-        <div class="sum"><span>Ongkir${order.shippingService ? ' <small>(' + escapeHtml(String(order.shippingCourier).toUpperCase()) + ' ' + escapeHtml(order.shippingService) + ')</small>' : ''}</span><span>${shippingPending ? 'Ditetapkan admin' : formatRupiah(order.shippingFee)}</span></div>
+        ${isPickup ? '' : `<div class="sum"><span>Ongkir${order.shippingService ? ' <small>(' + escapeHtml(String(order.shippingCourier).toUpperCase()) + ' ' + escapeHtml(order.shippingService) + ')</small>' : ''}</span><span>${shippingPending ? 'Ditetapkan admin' : formatRupiah(order.shippingFee)}</span></div>`}
         <div class="sum t"><span>TOTAL</span><span>${shippingPending ? 'Subtotal + ongkir' : formatRupiah(order.total)}</span></div>
         <hr>
         <ul class="tl">${timeline}</ul>
@@ -926,15 +965,20 @@ function bindCheckoutForm() {
     if (!/^08\d{8,12}$/.test(phone)) {
       return (errorBox.textContent = 'Gunakan nomor yang diawali 08.');
     }
-    if (
-      data.delivery === 'kirim' &&
-      (data.address.trim().length < 8 || data.city.trim().length < 3 || !/^\d{5}$/.test(data.postal))
-    ) {
-      return (errorBox.textContent = 'Lengkapi alamat, kota, dan kode pos 5 angka.');
-    }
-    // Pembeli wajib memilih layanan kurir, kecuali RajaOngkir sedang tidak bisa dihubungi
-    if (data.delivery === 'kirim' && !shippingChoice && !shippingFailed) {
-      return (errorBox.textContent = 'Cari kota tujuan, lalu pilih kurir dan layanan pengiriman.');
+    if (data.delivery === 'kirim') {
+      if (!shippingFailed && !shippingDestination) {
+        return (errorBox.textContent = 'Pilih kecamatan / kelurahan tujuan dari daftar.');
+      }
+      if (data.address.trim().length < 8) {
+        return (errorBox.textContent = 'Isi detail alamat (nama jalan, nomor rumah, RT/RW).');
+      }
+      if (data.city.trim().length < 3 || !/^\d{5}$/.test(data.postal)) {
+        return (errorBox.textContent = 'Lengkapi kota dan kode pos 5 angka.');
+      }
+      // Pembeli wajib memilih layanan kurir, kecuali RajaOngkir sedang tidak bisa dihubungi
+      if (!shippingChoice && !shippingFailed) {
+        return (errorBox.textContent = 'Pilih layanan pengiriman.');
+      }
     }
 
     // Kirim pilihan ongkir (kalau ada). Harganya dihitung ulang oleh server.
@@ -948,6 +992,7 @@ function bindCheckoutForm() {
       const order = await API.createOrder(data, cart);
       appliedVoucher = null;
       shippingChoice = null;
+      shippingDestination = null;
       cart = [];
       saveCart();
       location.hash = '#/dibuat/' + order.code;
@@ -957,24 +1002,68 @@ function bindCheckoutForm() {
   };
 }
 
+/* Ubah label RajaOngkir menjadi nama wilayah rapi + kode pos.
+ * "KLATAK, KALIPURO, BANYUWANGI, JAWA TIMUR, 68421" -> { area: "Klatak, Kalipuro, Banyuwangi, Jawa Timur", zip: "68421" } */
+function parseDestination(destination) {
+  const zip = String(destination.zip_code || '').trim();
+  const area = String(destination.label || '')
+    .replace(/,?\s*\d{5}\s*$/, '')
+    .toLowerCase()
+    .replace(/(^|[\s,.\-])([a-z])/g, (match, sep, char) => sep + char.toUpperCase());
+
+  // Kolom kota di database maksimal 100 karakter
+  return { area: area.length <= 100 ? area : String(destination.city_name || area).slice(0, 100), zip };
+}
+
+/*
+ * Pilih wilayah tujuan + hitung ongkir.
+ * Alurnya: cari kecamatan/kelurahan -> pilih dari daftar -> wilayah terkunci (tampil sebagai kartu, bisa "Ubah")
+ * -> ongkir semua kurir muncul -> pembeli memilih layanan.
+ * Kota & kode pos diisi otomatis dari wilayah yang dipilih (tidak diketik pembeli). Kolom manualnya hanya
+ * muncul kalau RajaOngkir tidak bisa dihubungi, atau kode pos wilayah tidak tersedia.
+ */
 function bindShipping(form) {
   const search = $('#shs');
   if (!search) return;
 
+  const box = $('#shbox');
   const suggestions = $('#shsug');
   const results = $('#shres');
-  let destination = null;
+  const picked = $('#shpick');
+  const manual = $('#shmanual');
+
   let timer = null;
+  let searchSeq = 0; // penanda pencarian terbaru, supaya hasil lama tidak menimpa yang baru
+  let costSeq = 0;   // sama, untuk perhitungan ongkir
+  let items = [];    // hasil pencarian yang sedang tampil
+  let active = -1;   // baris yang disorot lewat keyboard
+
+  shippingDestination = null;
   shippingChoice = null;
   shippingFailed = false;
 
+  const setArea = (area, zip) => {
+    form.elements.city.value = area;
+    form.elements.postal.value = zip;
+  };
+
+  const closeList = () => {
+    suggestions.innerHTML = '';
+    items = [];
+    active = -1;
+    search.setAttribute('aria-expanded', 'false');
+  };
+
   async function loadCosts() {
+    const mine = ++costSeq;
     shippingChoice = null;
     renderTotals();
     results.innerHTML = '<p class="ck-note">Menghitung ongkir…</p>';
 
     try {
-      const list = await API.shippingCost(destination.id, cartWeight(), SHIPPING_COURIERS);
+      const list = await API.shippingCost(shippingDestination.id, cartWeight(), SHIPPING_COURIERS);
+      if (mine !== costSeq) return;
+
       shippingFailed = false;
       // Layanan trucking (JTR) disembunyikan karena untuk barang berat
       const services = list
@@ -997,7 +1086,7 @@ function bindShipping(form) {
         if (!button) return;
         const s = services[+button.dataset.i];
         shippingChoice = {
-          destinationId: destination.id,
+          destinationId: shippingDestination.id,
           label: `${s.code.toUpperCase()} ${s.service}`,
           courier: s.code,
           service: s.service,
@@ -1008,50 +1097,115 @@ function bindShipping(form) {
         renderTotals();
       };
     } catch (error) {
+      if (mine !== costSeq) return;
       shippingFailed = true;
       results.innerHTML = '<p class="ck-note">Ongkir belum bisa dihitung otomatis. Kamu tetap bisa membuat pesanan, admin akan menetapkan ongkirnya.</p>';
     }
   }
 
-  // Enter di kolom cari tidak boleh men-submit form
-  search.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter') event.preventDefault();
-  });
+  /* Pembeli memilih satu wilayah dari daftar */
+  function choose(destination) {
+    const { area, zip } = parseDestination(destination);
+    const zipOk = /^\d{5}$/.test(zip);
+
+    clearTimeout(timer);
+    searchSeq++;
+    closeList();
+
+    shippingDestination = destination;
+    shippingFailed = false;
+
+    $('#shpl').textContent = area;
+    $('#shpz').textContent = zipOk ? 'Kode pos ' + zip : '';
+    picked.hidden = false;
+    box.hidden = true;
+
+    setArea(area, zipOk ? zip : '');
+    manual.hidden = zipOk; // kode pos tidak tersedia dari RajaOngkir: pembeli mengisinya sendiri
+
+    loadCosts();
+  }
+
+  /* "Ubah": kembali ke pencarian */
+  $('#shchg').onclick = () => {
+    costSeq++;
+    shippingDestination = null;
+    shippingChoice = null;
+    shippingFailed = false;
+    setArea('', '');
+    results.innerHTML = '';
+    manual.hidden = true;
+    picked.hidden = true;
+    box.hidden = false;
+    renderTotals();
+    search.value = '';
+    search.focus();
+  };
 
   search.addEventListener('input', () => {
-    destination = null;
-    shippingChoice = null;
-    renderTotals();
-    results.innerHTML = '';
     clearTimeout(timer);
+    closeList();
 
     const q = search.value.trim();
-    if (q.length < 3) { suggestions.innerHTML = ''; return; }
+    if (q.length < 3) return;
+
+    const mine = ++searchSeq;
+    suggestions.innerHTML = '<p class="shmsg">Mencari…</p>';
 
     timer = setTimeout(async () => {
       try {
         const list = await API.searchDestination(q);
-        shippingFailed = false;
-        suggestions.innerHTML = list.length
-          ? list.map((d, i) => `<button type="button" class="shsg" data-i="${i}">${escapeHtml(d.label)}</button>`).join('')
-          : '<p class="ck-note">Lokasi tidak ditemukan.</p>';
+        if (mine !== searchSeq) return;
 
-        suggestions.onclick = (event) => {
-          const button = event.target.closest('.shsg');
-          if (!button) return;
-          destination = list[+button.dataset.i];
-          search.value = destination.label;
-          suggestions.innerHTML = '';
-          // Isi otomatis kolom kota & kode pos (tetap bisa diedit)
-          form.elements.city.value = destination.city_name;
-          form.elements.postal.value = destination.zip_code;
-          loadCosts();
-        };
+        shippingFailed = false;
+        manual.hidden = true;
+        items = list;
+        active = -1;
+        search.setAttribute('aria-expanded', list.length ? 'true' : 'false');
+        suggestions.innerHTML = list.length
+          ? list.map((d, i) => `<button type="button" class="shsg" role="option" data-i="${i}">${escapeHtml(parseDestination(d).area)}<small>${escapeHtml(String(d.zip_code || ''))}</small></button>`).join('')
+          : '<p class="shmsg">Lokasi tidak ditemukan. Coba nama kecamatan atau kelurahan lain.</p>';
       } catch (error) {
+        if (mine !== searchSeq) return;
+
+        // RajaOngkir tidak bisa dihubungi: pembeli mengetik kota & kode pos, admin menetapkan ongkir
         shippingFailed = true;
-        suggestions.innerHTML = '<p class="ck-note">Pencarian lokasi sedang bermasalah. Kamu tetap bisa membuat pesanan, admin akan menetapkan ongkirnya.</p>';
+        manual.hidden = false;
+        items = [];
+        suggestions.innerHTML = '<p class="shmsg">Pencarian lokasi sedang bermasalah. Isi kota dan kode pos di bawah, admin akan menetapkan ongkirnya.</p>';
       }
     }, 400);
+  });
+
+  search.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault(); // Enter di kolom cari tidak boleh men-submit form
+      if (active >= 0 && items[active]) choose(items[active]);
+      else if (items.length === 1) choose(items[0]);
+      return;
+    }
+
+    if (event.key === 'Escape') {
+      closeList();
+      return;
+    }
+
+    if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && items.length) {
+      event.preventDefault();
+      active = (active + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+      suggestions.querySelectorAll('.shsg').forEach((button, i) => {
+        button.classList.toggle('on', i === active);
+        if (i === active) button.scrollIntoView({ block: 'nearest' });
+      });
+    }
+  });
+
+  // Daftar ditutup saat kolom kehilangan fokus; mousedown dicegah supaya klik pada pilihan tetap terbaca
+  search.addEventListener('blur', closeList);
+  suggestions.addEventListener('mousedown', (event) => event.preventDefault());
+  suggestions.addEventListener('click', (event) => {
+    const button = event.target.closest('.shsg');
+    if (button && items[+button.dataset.i]) choose(items[+button.dataset.i]);
   });
 
   form.addEventListener('change', renderTotals); // sembunyikan ongkir kalau pilih "Ambil di toko"
