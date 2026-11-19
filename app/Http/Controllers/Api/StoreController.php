@@ -23,8 +23,9 @@ class StoreController extends Controller
             'id' => $p->id, 'name' => $p->name, 'category' => $p->category, 'price' => $p->price,
             'weight' => (int) $p->weight, 'material' => $p->material, 'description' => $p->description, 'color' => $p->swatch,
             'photos' => $p->photos->map(fn ($photo) => [
-                'id' => $photo->id,
-                'url' => Storage::disk('public')->url($photo->path),
+            'id' => $photo->id,
+            'url' => Storage::disk('public')->url($photo->path),
+            'color' => $photo->color,
             ])->values(),
             'variants' => $p->variants->map(fn ($v) => [
                 'id' => $v->id, 'color' => $v->color, 'size' => $v->size, 'stock' => $v->stock,

@@ -154,7 +154,8 @@ const admin = {
   receiptCode: null,      // kode pesanan yang struknya sedang ditampilkan
   shipEditCode: null,     // kode pesanan yang form ongkir manualnya sedang dibuka (pesanan ongkir otomatis)
   form: null,             // form produk yang sedang terbuka (tambah/edit); null = daftar produk
-  photoQueue: [],         // foto yang dipilih tapi belum disimpan: { file, url }
+  photoQueue: [],         // foto yang dipilih tapi belum disimpan: { file, url, color }
+  photoColors: {},        // warna tiap foto yang sudah tersimpan: { idFoto: 'Ruby' }
   vouchers: [],           // daftar voucher (tab Promo)
   voucherForm: emptyVoucherForm(),   // isi form voucher; id null = voucher baru
   report: null,
@@ -467,33 +468,131 @@ function clearPhotoQueue() {
   admin.photoQueue = [];
 }
 
-/* Masukkan foto pilihan/seretan ke antrean setelah dicek format, ukuran, dan jumlahnya. */
-function queuePhotos(files) {
-  if (!admin.form) return;
+/* Foto asli boleh besar (mis. 18-30 MB); di browser dikecilkan dulu sebelum diunggah. */
+const PHOTO_MAX_RAW_BYTES = 60 * 1024 * 1024; // batas foto asli yang masih mau diproses
+const PHOTO_MAX_EDGE = 1600;                  // sisi terpanjang hasil (piksel)
+const PHOTO_QUALITY = 0.85;                   // kualitas JPG hasil (0-1)
+
+/* Kecilkan & kompres satu foto jadi JPG. Kalau gagal diproses, kembalikan foto aslinya. */
+async function compressPhoto(file) {
+  let bitmap;
+  try {
+    bitmap = await createImageBitmap(file);
+  } catch (error) {
+    return file;
+  }
+
+  const scale = Math.min(1, PHOTO_MAX_EDGE / Math.max(bitmap.width, bitmap.height));
+  const width = Math.round(bitmap.width * scale);
+  const height = Math.round(bitmap.height * scale);
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext('2d');
+  context.fillStyle = '#fff'; // PNG transparan jadi latar putih (JPG tidak punya transparansi)
+  context.fillRect(0, 0, width, height);
+  context.drawImage(bitmap, 0, 0, width, height);
+  if (bitmap.close) bitmap.close();
+
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', PHOTO_QUALITY));
+  if (!blob) return file;
+
+  return new File([blob], file.name.replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' });
+}
+
+let photoBusy = false; // true selama foto sedang dikecilkan, supaya pilihan beruntun tidak bertabrakan
+
+/* Masukkan foto pilihan/seretan ke antrean setelah dicek format, dikecilkan, dan dicek jumlahnya. */
+async function queuePhotos(files) {
+  if (!admin.form || photoBusy) return;
   const product = admin.form.id !== null ? admin.products.find((p) => p.id === admin.form.id) : null;
 
   let room = PHOTO_LIMIT - (product ? (product.photos || []).length : 0) - admin.photoQueue.length;
-  for (const file of files) {
-    if (!PHOTO_TYPES.includes(file.type)) {
-      showToast('Format foto harus JPG, PNG, atau WEBP', 2600);
-      continue;
+  photoBusy = true;
+  if (files.length) showToast('Memproses foto…', 8000);
+
+  try {
+    for (const original of files) {
+      if (!PHOTO_TYPES.includes(original.type)) {
+        showToast('Format foto harus JPG, PNG, atau WEBP', 2600);
+        continue;
+      }
+      if (original.size > PHOTO_MAX_RAW_BYTES) {
+        showToast('Foto terlalu besar (maks. 60 MB)', 2600);
+        continue;
+      }
+      if (room <= 0) {
+        showToast('Maksimal ' + PHOTO_LIMIT + ' foto per produk', 2600);
+        break;
+      }
+
+      const file = await compressPhoto(original);
+      if (file.size > PHOTO_MAX_BYTES) {
+        showToast('Foto masih terlalu besar setelah dikecilkan', 2600);
+        continue;
+      }
+
+      admin.photoQueue.push({ file, url: URL.createObjectURL(file), color: '' });
+      room--;
     }
-    if (file.size > PHOTO_MAX_BYTES) {
-      showToast('Ukuran foto maksimal 5 MB', 2600);
-      continue;
-    }
-    if (room <= 0) {
-      showToast('Maksimal ' + PHOTO_LIMIT + ' foto per produk', 2600);
-      break;
-    }
-    admin.photoQueue.push({ file, url: URL.createObjectURL(file) });
-    room--;
+  } finally {
+    photoBusy = false;
   }
   drawAdmin();
 }
 
 function replaceProduct(updated) {
   admin.products = admin.products.map((product) => (product.id === updated.id ? updated : product));
+}
+
+/* ---- Warna foto produk ---- */
+
+/* Ambil warna tiap foto yang sudah tersimpan. Kalau gagal, daftar dikosongkan (halaman produk tetap jalan). */
+async function loadPhotoColors() {
+  try {
+    admin.photoColors = Object.assign({}, await staffApi('photo-colors'));
+  } catch (error) {
+    admin.photoColors = {};
+  }
+}
+
+/* Warna-warna varian di form (tanpa duplikat), jadi pilihan di dropdown warna foto. */
+function formColors(form) {
+  return [...new Set(form.variants.map((variant) => String(variant.color).trim()).filter(Boolean))];
+}
+
+/* Isi dropdown warna foto: "Semua warna" (foto umum) + warna varian. */
+function photoColorOptions(colors, selected) {
+  const current = String(selected || '');
+  const list = current && !colors.some((color) => color.toLowerCase() === current.toLowerCase())
+    ? [...colors, current]
+    : colors;
+
+  return '<option value="">Semua warna</option>' + list.map((color) => `
+    <option value="${escapeHtml(color)}" ${color.toLowerCase() === current.toLowerCase() ? 'selected' : ''}>${escapeHtml(color)}</option>
+  `).join('');
+}
+
+/* Setelah foto baru terunggah: cocokkan dengan antrean (urutan sama) lalu simpan warnanya. */
+async function assignNewPhotoColors(productId, before, colors) {
+  if (!colors.some(Boolean)) return;
+
+  try {
+    const list = await staffApi('products');
+    const product = list.find((p) => p.id === productId);
+    const fresh = (product ? product.photos || [] : [])
+      .filter((photo) => !before.has(photo.id))
+      .sort((a, b) => a.id - b.id);
+
+    const photos = fresh
+      .map((photo, index) => ({ id: photo.id, color: colors[index] || null }))
+      .filter((row) => row.color);
+
+    if (photos.length) await staffApi('photo-colors', 'POST', { photos });
+  } catch (error) {
+    showToast('Foto tersimpan, tapi warnanya belum bisa disimpan. Atur lewat Edit produk.', 3400);
+  }
 }
 
 /* ---- Form produk (dipakai untuk Tambah dan Edit) ---- */
@@ -552,6 +651,7 @@ function renderProductForm() {
   const form = admin.form;
   const editing = form.id !== null;
   const product = editing ? admin.products.find((p) => p.id === form.id) : null;
+  const colors = formColors(form);
 
   const categoryOptions = PRODUCT_CATEGORIES.map((category) => `
     <option value="${category}" ${category === form.category ? 'selected' : ''}>${categoryLabel(category)}</option>
@@ -568,15 +668,21 @@ function renderProductForm() {
     </div>`).join('');
 
   const saved = (product ? product.photos || [] : []).map((photo) => `
-    <div class="ph-item">
-      <img src="${escapeHtml(photo.url)}" alt="">
-      <button type="button" class="ph-x" data-a="photo-del" data-v="${photo.id}" aria-label="Hapus foto">×</button>
+    <div class="ph-cell">
+      <div class="ph-item">
+        <img src="${escapeHtml(photo.url)}" alt="">
+        <button type="button" class="ph-x" data-a="photo-del" data-v="${photo.id}" aria-label="Hapus foto">×</button>
+      </div>
+      <select class="ph-color" data-pc="${photo.id}" aria-label="Warna foto">${photoColorOptions(colors, admin.photoColors[photo.id] || photo.color)}</select>
     </div>`).join('');
 
   const queued = admin.photoQueue.map((item, index) => `
-    <div class="ph-item new">
-      <img src="${item.url}" alt="">
-      <button type="button" class="ph-x" data-a="photo-unq" data-v="${index}" aria-label="Batalkan foto ini">×</button>
+    <div class="ph-cell">
+      <div class="ph-item new">
+        <img src="${item.url}" alt="">
+        <button type="button" class="ph-x" data-a="photo-unq" data-v="${index}" aria-label="Batalkan foto ini">×</button>
+      </div>
+      <select class="ph-color" data-qc="${index}" aria-label="Warna foto">${photoColorOptions(colors, item.color)}</select>
     </div>`).join('');
 
   return `
@@ -616,9 +722,10 @@ function renderProductForm() {
         <label class="dz">
           ${UPLOAD_ICON}
           <span class="dz-t">Seret foto ke sini atau pilih dari perangkat</span>
-          <span class="dz-s">JPG, PNG, WEBP · maks. 5 MB per foto · hingga ${PHOTO_LIMIT} foto</span>
+          <span class="dz-s">JPG, PNG, WEBP · foto besar otomatis dikecilkan · hingga ${PHOTO_LIMIT} foto</span>
           <input type="file" id="pfile" accept="image/jpeg,image/png,image/webp" multiple>
         </label>
+        <p class="pf-hint">Pilih warna di bawah tiap foto supaya foto ikut berganti saat pelanggan memilih warna itu. "Semua warna" untuk foto umum (group shot, packaging). Warna diambil dari daftar varian di atas.</p>
         <p class="pf-hint">Produk bisa disimpan tanpa foto. Pelanggan akan melihat placeholder sampai foto ditambahkan</p>
       </div>
 
@@ -883,7 +990,10 @@ const adminActions = {
     admin.tab = el.dataset.v;
     clearPhotoQueue();
     admin.form = null;
-    if (admin.tab === 'products') admin.products = await staffApi('products');
+    if (admin.tab === 'products') {
+      admin.products = await staffApi('products');
+      await loadPhotoColors();
+    }
     if (admin.tab === 'promos') {
       admin.vouchers = await staffApi('vouchers');
       admin.voucherForm = emptyVoucherForm();
@@ -1125,6 +1235,10 @@ const adminActions = {
       let productId = form.id ?? result?.id ?? result?.product?.id ?? result?.data?.id ?? null;
 
       if (admin.photoQueue.length) {
+        /* Catat warna tiap foto antrean dan foto yang sudah ada, untuk mencocokkan foto baru setelah diunggah. */
+        const queuedColors = admin.photoQueue.map((item) => item.color || '');
+        const before = new Set((original ? original.photos || [] : []).map((photo) => photo.id));
+
         if (productId === null) {
           /* Server tidak mengembalikan id: ambil produk terbaru dengan nama yang sama. */
           const list = await staffApi('products');
@@ -1140,11 +1254,14 @@ const adminActions = {
           } catch (error) {
             /* Produk sudah tersimpan; buka lagi mode edit supaya foto bisa dicoba ulang. */
             admin.products = await staffApi('products');
+            await loadPhotoColors();
             const saved = admin.products.find((p) => p.id === productId);
             if (saved) admin.form = productToForm(saved);
             drawAdmin();
             throw new Error('Produk tersimpan, tetapi foto gagal diunggah. ' + error.message);
           }
+
+          await assignNewPhotoColors(productId, before, queuedColors);
         }
       }
 
@@ -1152,6 +1269,7 @@ const adminActions = {
       clearPhotoQueue();
       admin.form = null;
       admin.products = await staffApi('products');
+      await loadPhotoColors();
       drawAdmin();
       window.scrollTo({ top: 0, behavior: 'smooth' });
       showToast(wasEditing ? 'Produk diperbarui' : 'Produk disimpan', 2400);
@@ -1537,6 +1655,22 @@ document.addEventListener('change', (event) => {
       await staffApi(`variants/${el.dataset.v}/stock`, 'POST', { stock: +el.value });
       showToast('Stok disimpan', 2400);
     });
+  }
+
+  // Admin: warna foto yang sudah tersimpan, langsung disimpan begitu dipilih
+  if (el.dataset.pc !== undefined) {
+    safely(async () => {
+      const id = el.dataset.pc;
+      await staffApi('photo-colors', 'POST', { photos: [{ id: +id, color: el.value || null }] });
+      if (el.value) admin.photoColors[id] = el.value;
+      else delete admin.photoColors[id];
+      showToast('Warna foto disimpan', 2000);
+    });
+  }
+
+  // Admin: warna foto yang masih antre (disimpan bersama produk)
+  if (el.dataset.qc !== undefined && admin.photoQueue[+el.dataset.qc]) {
+    admin.photoQueue[+el.dataset.qc].color = el.value;
   }
 
   // Admin: tombol "Ubah Status" aktif hanya kalau pilihan beda dari status sekarang

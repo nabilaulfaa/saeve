@@ -4,6 +4,7 @@ use App\Http\Controllers\StaffAuthController;
 use App\Http\Controllers\StaffController;
 use App\Http\Middleware\EnsureRole;
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\PhotoColorController;
 
 Route::view('/', 'saeve');
 
@@ -37,5 +38,7 @@ Route::prefix('staff')->group(function () {
         Route::get('report', [StaffController::class, 'report']);
         Route::post('products/{product}/photos', [StaffController::class, 'uploadPhotos']);
         Route::delete('photos/{photo}', [StaffController::class, 'deletePhoto']);
+        Route::get('photo-colors', [PhotoColorController::class, 'index']);
+        Route::post('photo-colors', [PhotoColorController::class, 'update']);
     });
 });

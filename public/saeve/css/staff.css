@@ -2038,3 +2038,24 @@ body[data-page="admin"] .orow {
     min-height: 0;
   }
 }
+
+/* Pilihan warna di bawah tiap foto produk */
+.ph-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: max-content;
+  max-width: 100%;
+}
+
+.ph-color {
+  width: 100%;
+  min-width: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  font: inherit;
+  font-size: .85rem;
+  color: var(--body);
+}

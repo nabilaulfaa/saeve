@@ -43,6 +43,9 @@ const COLOR_HEX = {
   rose: '#D9A0A0', 'rose gold': '#C9967A', gold: '#C9A24B', silver: '#C4C4C4', white: '#F4F1EA',
   black: '#222', purple: '#7B2D8E', blue: '#4F7CAC', green: '#4F8A6B', pastel: '#E7D3E6',
   clear: '#E8E4DC', peach: '#F0B99B', lilac: '#BFA3D6',
+  amethyst: '#9966CC', sage: '#9CAF88', champagne: '#E8D5B0', 'ice blue': '#BFDDEB',
+  cactus: '#6B8F5E', cherry: '#B0213A', bloom: '#D98BA8', muse: '#8E6FA8',
+  denim: '#3A4F7A', 'ruby bloom': '#B03050', watermelon: '#E0566B',
 };
 
 function swatchColor(product, name) {
@@ -510,15 +513,14 @@ const views = {
       <button type="button" class="sw" data-color="${escapeHtml(name)}" style="--c:${swatchColor(product, name)}" aria-label="${escapeHtml(name)}" title="${escapeHtml(name)}"></button>
     `).join('');
 
-    // Foto produk dari admin: foto utama + thumbnail kalau lebih dari satu
+    // Foto produk: foto utama + thumbnail (thumbnail diisi di bindProduct supaya ikut berganti saat warna dipilih)
     const photos = product.photos || [];
     const gallery = `
       <div class="pd-gal">
         <div class="pd-img">${photos[0]
           ? `<img id="pimg" src="${escapeHtml(photos[0].url)}" alt="${escapeHtml(product.name)}">`
           : ''}</div>
-        ${photos.length > 1 ? `<div class="pd-thumbs">${photos.map((photo, index) => `
-          <button type="button" class="pd-th ${index === 0 ? 'on' : ''}" data-src="${escapeHtml(photo.url)}" aria-label="Foto ${index + 1}"><img src="${escapeHtml(photo.url)}" alt=""></button>`).join('')}</div>` : ''}
+        <div class="pd-thumbs" id="pthumbs"></div>
       </div>`;
 
     return `
@@ -794,14 +796,6 @@ function bindProduct() {
   const root = $('#pd');
   if (!root) return;
 
-  // Klik thumbnail = ganti foto utama
-  $$('.pd-th').forEach((button) => {
-    button.onclick = () => {
-      $('#pimg').src = button.dataset.src;
-      $$('.pd-th').forEach((b) => b.classList.toggle('on', b === button));
-    };
-  });
-
   const product = API.getProduct(root.dataset.id);
   const variants = product.variants;
   let color = (variants.find((variant) => variant.stock > 0) || variants[0]).color;
@@ -810,6 +804,34 @@ function bindProduct() {
 
   const optionsOf = (name) => variants.filter((variant) => variant.color === name);
   const current = () => optionsOf(color).find((variant) => (variant.size || null) === (size || null));
+
+  /* Foto ikut warna: foto yang punya field `color` sama dengan warna terpilih tampil lebih dulu,
+   * diikuti foto umum (tanpa color). Kalau belum ada foto yang diberi warna, semua foto tampil seperti biasa. */
+  const allPhotos = product.photos || [];
+  const sameColor = (photo, name) => String(photo.color || '').toLowerCase() === String(name).toLowerCase();
+
+  function showPhotos() {
+    const own = allPhotos.filter((photo) => sameColor(photo, color));
+    const shared = allPhotos.filter((photo) => !photo.color);
+    const list = own.length ? [...own, ...shared] : (shared.length ? shared : allPhotos);
+
+    $('.pd-img').innerHTML = list[0]
+      ? `<img id="pimg" src="${escapeHtml(list[0].url)}" alt="${escapeHtml(product.name)}">`
+      : '';
+
+    const thumbs = $('#pthumbs');
+    thumbs.innerHTML = list.length > 1
+      ? list.map((photo, index) => `
+          <button type="button" class="pd-th ${index === 0 ? 'on' : ''}" data-src="${escapeHtml(photo.url)}" aria-label="Foto ${index + 1}"><img src="${escapeHtml(photo.url)}" alt=""></button>`).join('')
+      : '';
+
+    thumbs.onclick = (event) => {
+      const button = event.target.closest('.pd-th');
+      if (!button) return;
+      $('#pimg').src = button.dataset.src;
+      $$('.pd-th').forEach((b) => b.classList.toggle('on', b === button));
+    };
+  }
 
   function refresh() {
     // Pilih ukuran yang valid untuk warna ini
@@ -846,6 +868,7 @@ function bindProduct() {
       color = button.dataset.color;
       qty = 1;
       refresh();
+      showPhotos();
     };
   });
 
@@ -888,6 +911,7 @@ function bindProduct() {
   };
 
   refresh();
+  showPhotos();
 }
 
 function bindCartDelete() {
